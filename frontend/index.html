@@ -86,7 +86,7 @@
 
     <div class="flex h-screen">
         <!-- 左侧菜单 -->
-        <div class="w-64 bg-white/10 backdrop-blur-xl shadow-lg z-10 border-r border-white/20">
+        <div class="w-64 bg-white/10 backdrop-blur-xl shadow-lg z-30 border-r border-white/20">
             <!-- 头部 -->
             <div class="bg-gradient-primary h-16 flex items-center justify-center relative overflow-hidden">
                 <div class="absolute inset-0 animate-glow"></div>
@@ -152,62 +152,77 @@
         </div>
         
         <!-- 内容区域 -->
-        <div class="flex-1 overflow-hidden flex flex-col relative z-10">
+        <div class="flex-1 overflow-hidden flex flex-col relative" id="contentArea">
             <!-- 标签页栏 -->
-            <div class="bg-white/5 border-b border-white/10 px-4 py-2 flex items-center" id="tabBar">
+            <div class="bg-white/5 border-b border-white/10 px-4 py-2 flex items-center relative" style="z-index: 25;" id="tabBar">
                 <div class="flex items-center space-x-2 overflow-x-auto" id="tabs">
                     <!-- 标签页将动态添加 -->
                 </div>
             </div>
             
             <!-- 页面内容区域 -->
-            <div class="flex-1 overflow-y-auto p-6">
+            <div class="flex-1 relative overflow-hidden" id="pageContent">
                 <!-- 概览页面 -->
-                <div class="page" id="dashboard-page">
-                    <div id="dashboard-content">
-                        <!-- 内容将通过AJAX加载 -->
+                <div class="page absolute inset-0 flex flex-col" id="dashboard-page">
+                    <div class="flex-1 overflow-y-auto p-6">
+                        <div id="dashboard-content">
+                            <!-- 内容将通过AJAX加载 -->
+                        </div>
                     </div>
                 </div>
                 
                 <!-- 流管理页面 -->
-                <div class="page hidden" id="streams-page">
-                    <div id="streams-content">
-                        <!-- 内容将通过AJAX加载 -->
+                <div class="page absolute inset-0 flex flex-col hidden" id="streams-page">
+                    <div class="flex-1 overflow-y-auto p-6">
+                        <div id="streams-content">
+                            <!-- 内容将通过AJAX加载 -->
+                        </div>
                     </div>
+                    <div id="streams-modal-container" class="absolute inset-0 pointer-events-none" style="z-index: 20;"></div>
                 </div>
                 
                 <!-- 拉流代理页面 -->
-                <div class="page hidden" id="pull-proxy-page">
-                    <div id="pull-proxy-content">
-                        <!-- 内容将通过AJAX加载 -->
+                <div class="page absolute inset-0 flex flex-col hidden" id="pull-proxy-page">
+                    <div class="flex-1 overflow-y-auto p-6">
+                        <div id="pull-proxy-content">
+                            <!-- 内容将通过AJAX加载 -->
+                        </div>
                     </div>
                 </div>
                 
                 <!-- 推流代理页面 -->
-                <div class="page hidden" id="push-proxy-page">
-                    <div id="push-proxy-content">
-                        <!-- 内容将通过AJAX加载 -->
+                <div class="page absolute inset-0 flex flex-col hidden" id="push-proxy-page">
+                    <div class="flex-1 overflow-y-auto p-6">
+                        <div id="push-proxy-content">
+                            <!-- 内容将通过AJAX加载 -->
+                        </div>
                     </div>
                 </div>
                 
                 <!-- 鉴权管理页面 -->
-                <div class="page hidden" id="auth-page">
-                    <div id="auth-content">
-                        <!-- 内容将通过AJAX加载 -->
+                <div class="page absolute inset-0 flex flex-col hidden" id="auth-page">
+                    <div class="flex-1 overflow-y-auto p-6">
+                        <div id="auth-content">
+                            <!-- 内容将通过AJAX加载 -->
+                        </div>
                     </div>
                 </div>
                 
                 <!-- 服务配置页面 -->
-                <div class="page hidden" id="settings-page">
-                    <div id="settings-content">
-                        <!-- 内容将通过AJAX加载 -->
+                <div class="page absolute inset-0 flex flex-col hidden" id="settings-page">
+                    <div class="flex-1 overflow-y-auto p-6">
+                        <div id="settings-content">
+                            <!-- 内容将通过AJAX加载 -->
+                        </div>
                     </div>
                 </div>
                 
                 <!-- 在线推流页面 -->
-                <div class="page hidden" id="whip-page">
-                    <div id="whip-content">
-                        <!-- 内容将通过AJAX加载 -->
+                <div class="page absolute inset-0 flex flex-col hidden" id="whip-page">
+                    <div class="flex-1 overflow-y-auto p-6">
+                        <div id="whip-content">
+                            <!-- 内容将通过AJAX加载 -->
+                        </div>
                     </div>
                 </div>
             </div>

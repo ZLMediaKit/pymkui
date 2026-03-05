@@ -166,12 +166,13 @@ function playStream(app, stream, schema) {
 function playWithNative(app, stream, schema) {
     try {
         const modal = document.createElement('div');
-        modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50';
+        modal.className = 'absolute inset-0 bg-black/80 flex items-center justify-center pointer-events-auto';
+        modal.setAttribute('data-modal', 'streams');
         modal.innerHTML = `
-            <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 border border-white/20">
+            <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 border border-white/20" onclick="event.stopPropagation()">
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-xl font-bold text-white">播放流: ${app}/${stream}</h3>
-                    <button class="text-white/60 hover:text-white" onclick="this.closest('.fixed').remove()">
+                    <button class="text-white/60 hover:text-white" onclick="this.closest('.absolute').remove()">
                         <i class="fa fa-times text-2xl"></i>
                     </button>
                 </div>
@@ -183,7 +184,13 @@ function playWithNative(app, stream, schema) {
                 </div>
             </div>
         `;
-        document.body.appendChild(modal);
+        document.getElementById('streams-modal-container').appendChild(modal);
+        
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        });
         
         const playUrl = generatePlayUrl(app, stream, schema);
         
@@ -244,12 +251,13 @@ async function showStreamInfo(schema, vhost, app, stream) {
         const data = result;
         
         const modal = document.createElement('div');
-        modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50 overflow-y-auto';
+        modal.className = 'absolute inset-0 bg-black/80 flex items-center justify-center overflow-y-auto pointer-events-auto';
+        modal.setAttribute('data-modal', 'streams');
         modal.innerHTML = `
-            <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 my-8 border border-white/20">
+            <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 my-8 border border-white/20" onclick="event.stopPropagation()">
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-xl font-bold text-white">流信息: ${app}/${stream}</h3>
-                    <button class="text-white/60 hover:text-white" onclick="this.closest('.fixed').remove()">
+                    <button class="text-white/60 hover:text-white" onclick="this.closest('.absolute').remove()">
                         <i class="fa fa-times text-2xl"></i>
                     </button>
                 </div>
@@ -258,7 +266,13 @@ async function showStreamInfo(schema, vhost, app, stream) {
                 </div>
             </div>
         `;
-        document.body.appendChild(modal);
+        document.getElementById('streams-modal-container').appendChild(modal);
+        
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        });
         
     } catch (error) {
         console.error('获取流信息失败:', error);
@@ -445,12 +459,13 @@ function renderStreamInfo(data) {
 async function playWithWHEP(app, stream) {
     try {
         const modal = document.createElement('div');
-        modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50';
+        modal.className = 'absolute inset-0 bg-black/80 flex items-center justify-center pointer-events-auto';
+        modal.setAttribute('data-modal', 'streams');
         modal.innerHTML = `
-            <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 border border-white/20">
+            <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 border border-white/20" onclick="event.stopPropagation()">
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-xl font-bold text-white">播放流: ${app}/${stream}</h3>
-                    <button class="text-white/60 hover:text-white" onclick="this.closest('.fixed').remove()">
+                    <button class="text-white/60 hover:text-white" onclick="this.closest('.absolute').remove()">
                         <i class="fa fa-times text-2xl"></i>
                     </button>
                 </div>
@@ -462,7 +477,13 @@ async function playWithWHEP(app, stream) {
                 </div>
             </div>
         `;
-        document.body.appendChild(modal);
+        document.getElementById('streams-modal-container').appendChild(modal);
+        
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        });
         
         const video = document.getElementById('whepVideo');
         
@@ -524,12 +545,13 @@ async function playWithWHEP(app, stream) {
 function playWithJessibuca(app, stream, schema) {
     try {
         const modal = document.createElement('div');
-        modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50';
+        modal.className = 'absolute inset-0 bg-black/80 flex items-center justify-center pointer-events-auto';
+        modal.setAttribute('data-modal', 'streams');
         modal.innerHTML = `
-            <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 border border-white/20">
+            <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 border border-white/20" onclick="event.stopPropagation()">
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-xl font-bold text-white">播放流: ${app}/${stream}</h3>
-                    <button class="text-white/60 hover:text-white" onclick="this.closest('.fixed').remove()">
+                    <button class="text-white/60 hover:text-white" onclick="this.closest('.absolute').remove()">
                         <i class="fa fa-times text-2xl"></i>
                     </button>
                 </div>
@@ -541,7 +563,13 @@ function playWithJessibuca(app, stream, schema) {
                 </div>
             </div>
         `;
-        document.body.appendChild(modal);
+        document.getElementById('streams-modal-container').appendChild(modal);
+        
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        });
         
         const playUrl = generatePlayUrl(app, stream, schema);
         
