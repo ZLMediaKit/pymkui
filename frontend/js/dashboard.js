@@ -26,14 +26,30 @@ async function loadDashboard() {
     }
 }
 
-// 页面加载完成后初始化并设置定时器
-window.addEventListener('load', function() {
+// 存储定时器ID
+let dashboardTimer = null;
+
+// 初始化dashboard，在dashboard.html加载完成后调用
+function initDashboard() {
     // 首次加载数据
     loadDashboard();
     
+    // 清除之前的定时器
+    if (dashboardTimer) {
+        clearInterval(dashboardTimer);
+    }
+    
     // 设置3秒刷新一次状态
-    setInterval(loadDashboard, 3000);
-});
+    dashboardTimer = setInterval(loadDashboard, 3000);
+}
+
+// 清理dashboard资源
+function cleanupDashboard() {
+    if (dashboardTimer) {
+        clearInterval(dashboardTimer);
+        dashboardTimer = null;
+    }
+}
 
 async function loadVersion() {
     try {

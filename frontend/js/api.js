@@ -338,6 +338,10 @@ const Api = {
         return this.request('/index/pyapi/host-stats', { method: 'GET' });
     },
 
+    async closeStream(schema, vhost, app, stream) {
+        return this.request('/index/api/close_stream', { body: { schema, vhost, app, stream } });
+    },
+
     clearAuth() {
         this.cookie = '';
         localStorage.removeItem('serverUrl');

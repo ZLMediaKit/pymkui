@@ -157,7 +157,7 @@ class PyMultiMediaSourceMuxer:
     def addTrackCompleted(self):
         mk_logger.log_info(f"addTrackCompleted")
     def inputFrame(self, frame: mk_loader.Frame):
-        mk_logger.log_info(f"inputFrame: {frame.getCodecName()} {frame.dts()}")
+        # mk_logger.log_info(f"inputFrame: {frame.getCodecName()} {frame.dts()}")
         return True
 def on_create_muxer(sender: mk_loader.MultiMediaSourceMuxer):
     return PyMultiMediaSourceMuxer(sender)

@@ -97,6 +97,9 @@ function closeTab(pageName, event) {
     if (pageName === 'whip' && typeof whipState !== 'undefined' && whipState.isStreaming) {
         console.log('关闭whip标签页，停止推流...');
         stopWhipStream();
+    } else if (pageName === 'dashboard' && typeof cleanupDashboard === 'function') {
+        console.log('关闭dashboard标签页，清理资源...');
+        cleanupDashboard();
     }
     
     tabs.splice(tabIndex, 1);
@@ -187,10 +190,10 @@ async function loadDashboardPage() {
             
             setTimeout(() => {
                 console.log('开始初始化dashboard功能...');
-                if (typeof loadDashboard === 'function') {
-                    loadDashboard();
+                if (typeof initDashboard === 'function') {
+                    initDashboard();
                 } else {
-                    console.error('loadDashboard函数未定义');
+                    console.error('initDashboard函数未定义');
                 }
             }, 100);
         } else {
@@ -515,20 +518,74 @@ function initNavigation() {
     });
 }
 
+function showConfirmModal(title, message, onConfirm, onCancel) {
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50';
+    modal.innerHTML = `
+        <div class="bg-gray-900 rounded-xl p-6 max-w-md w-full mx-4 border border-white/20" id="confirmModalContent">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-white">${title}</h3>
+                <button class="text-white/60 hover:text-white" id="confirmModalClose">
+                    <i class="fa fa-times text-2xl"></i>
+                </button>
+            </div>
+            <p class="text-white/80 mb-6">${message}</p>
+            <div class="flex justify-end space-x-3">
+                <button class="bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-600 transition-colors" id="confirmModalCancel">取消</button>
+                <button class="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors" id="confirmModalConfirm">确认</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    
+    // 添加事件监听器
+    document.getElementById('confirmModalClose').addEventListener('click', function() {
+        modal.remove();
+    });
+    
+    document.getElementById('confirmModalCancel').addEventListener('click', function() {
+        modal.remove();
+        if (typeof onCancel === 'function') {
+            onCancel();
+        }
+    });
+    
+    document.getElementById('confirmModalConfirm').addEventListener('click', function() {
+        modal.remove();
+        if (typeof onConfirm === 'function') {
+            onConfirm();
+        }
+    });
+    
+    document.getElementById('confirmModalContent').addEventListener('click', function(e) {
+        e.stopPropagation();
+    });
+    
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+}
+
 async function initLogout() {
     document.getElementById('logoutBtn').addEventListener('click', async function() {
-        if (confirm('确定要退出登录吗？')) {
-            try {
-                await Api.logout();
-                Api.clearAuth();
-                showToast('已退出登录', 'info');
-                setTimeout(() => {
-                    window.location.href = 'login.html';
-                }, 1000);
-            } catch (error) {
-                showToast('退出登录失败: ' + error.message, 'error');
+        showConfirmModal(
+            '确认退出登录',
+            '确定要退出登录吗？',
+            async function() {
+                try {
+                    await Api.logout();
+                    Api.clearAuth();
+                    showToast('已退出登录', 'info');
+                    setTimeout(() => {
+                        window.location.href = 'login.html';
+                    }, 1000);
+                } catch (error) {
+                    showToast('退出登录失败: ' + error.message, 'error');
+                }
             }
-        }
+        );
     });
 }
 

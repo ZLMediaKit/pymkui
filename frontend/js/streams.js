@@ -55,7 +55,7 @@ async function loadStreams() {
                         <td class="p-4">
                             <button class="bg-gradient-primary text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors mr-2" onclick="playStream('${stream.app}', '${stream.stream}', '${stream.schema}')">播放</button>
                             <button class="bg-gradient-accent text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors mr-2" onclick="showStreamInfo('${stream.schema}', '${vhost}', '${stream.app}', '${stream.stream}')">查看</button>
-                            <button class="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors">停止</button>
+                            <button class="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors" onclick="stopStream('${stream.schema}', '${vhost}', '${stream.app}', '${stream.stream}')">停止</button>
                         </td>
                     </tr>
                 `;
@@ -654,4 +654,80 @@ function initJessibucaPlayer(playUrl, modal) {
         console.error('初始化Jessibuca播放器失败:', error);
         showToast('初始化播放器失败: ' + error.message, 'error');
     }
+}
+
+function showConfirmModal(title, message, onConfirm, onCancel) {
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50';
+    modal.innerHTML = `
+        <div class="bg-gray-900 rounded-xl p-6 max-w-md w-full mx-4 border border-white/20" id="confirmModalContent">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-white">${title}</h3>
+                <button class="text-white/60 hover:text-white" id="confirmModalClose">
+                    <i class="fa fa-times text-2xl"></i>
+                </button>
+            </div>
+            <p class="text-white/80 mb-6">${message}</p>
+            <div class="flex justify-end space-x-3">
+                <button class="bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-600 transition-colors" id="confirmModalCancel">取消</button>
+                <button class="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors" id="confirmModalConfirm">确认</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    
+    // 添加事件监听器
+    document.getElementById('confirmModalClose').addEventListener('click', function() {
+        modal.remove();
+    });
+    
+    document.getElementById('confirmModalCancel').addEventListener('click', function() {
+        modal.remove();
+        if (typeof onCancel === 'function') {
+            onCancel();
+        }
+    });
+    
+    document.getElementById('confirmModalConfirm').addEventListener('click', function() {
+        modal.remove();
+        if (typeof onConfirm === 'function') {
+            onConfirm();
+        }
+    });
+    
+    document.getElementById('confirmModalContent').addEventListener('click', function(e) {
+        e.stopPropagation();
+    });
+    
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+}
+
+async function stopStream(schema, vhost, app, stream) {
+    // 显示自定义确认弹窗
+    showConfirmModal(
+        '确认停止流',
+        `确定要停止流 ${app}/${stream} 吗？`,
+        async function() {
+            try {
+                console.log('停止流:', schema, vhost, app, stream);
+                
+                const result = await Api.closeStream(schema, vhost, app, stream);
+                
+                if (result.code === 0) {
+                    showToast('停止流成功', 'success');
+                    // 重新加载流列表
+                    loadStreams();
+                } else {
+                    showToast('停止流失败: ' + (result.msg || '未知错误'), 'error');
+                }
+            } catch (error) {
+                console.error('停止流失败:', error);
+                showToast('停止流失败: ' + error.message, 'error');
+            }
+        }
+    );
 }
