@@ -177,7 +177,7 @@ function showPullProxyModal(title, data, serverConfig = {}, readOnly = false, in
                             </label>
                             <input type="text" id="pullUrl" ${disabledAttr}
                                 value="${getValue('url')}"
-                                placeholder="rtsp://192.168.1.100/stream  或  rtmp://...  或  http://..."
+                                placeholder="支持rtsp[s]、rtmp[s]、hls、http[s]-ts、http[s]-flv、srt、webrtc[s]"
                                 class="${inputCls}">
                         </div>
                         <div class="grid grid-cols-3 gap-4">
