@@ -101,6 +101,8 @@ function closeTab(pageName, event) {
     // 清理模态框和播放器
     if (pageName === 'streams' && typeof cleanupStreamsPage === 'function') {
         cleanupStreamsPage();
+    } else if (pageName === 'pull-proxy' && typeof cleanupPullProxyPage === 'function') {
+        cleanupPullProxyPage();
     } else if (pageName === 'protocol-options') {
         const protocolOptionsModalContainer = document.getElementById('protocol-options-modal-container');
         if (protocolOptionsModalContainer) {
@@ -313,6 +315,15 @@ async function loadPullProxyPage() {
             console.log('pull-proxy.html文件内容长度:', html.length);
             content.innerHTML = html;
             console.log('pull-proxy.html文件内容已加载到页面');
+            
+            setTimeout(() => {
+                console.log('开始初始化pull-proxy功能...');
+                if (typeof loadPullProxyList === 'function') {
+                    loadPullProxyList();
+                } else {
+                    console.error('loadPullProxyList函数未定义');
+                }
+            }, 100);
         } else {
             console.error('加载pull-proxy.html文件失败，状态:', response.status);
             content.innerHTML = `

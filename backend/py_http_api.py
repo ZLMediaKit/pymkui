@@ -188,6 +188,37 @@ async def get_param_from_request(
 
     return None
 
+
+def get_zlm_base_url() -> str:
+    """
+    获取 ZLMediaKit 内部访问的 base URL。
+    - http.port != 0  → http://127.0.0.1:{http.port}
+    - http.port == 0  → https://127.0.0.1:{http.ssl_port}
+    """
+    http_port = mk_loader.get_config("http.port")
+    try:
+        http_port = int(http_port)
+    except (TypeError, ValueError):
+        http_port = 0
+
+    if http_port != 0:
+        return f"http://127.0.0.1:{http_port}"
+    else:
+        ssl_port = mk_loader.get_config("http.ssl_port")
+        return f"https://127.0.0.1:{ssl_port}"
+
+
+def get_forward_headers(request: Request) -> dict:
+    """
+    从入站请求中提取需要透传给 ZLMediaKit 的 headers（目前仅 cookie）。
+    """
+    headers: dict = {}
+    cookie = request.headers.get("cookie")
+    if cookie:
+        headers["cookie"] = cookie
+    return headers
+
+
 # 初始化数据库实例
 db = Database()
 
@@ -425,4 +456,251 @@ async def get_protocol_options(id: int = Query(..., description="预设ID")):
             return {"code": -1, "msg": "预设不存在"}
     except Exception as e:
         mk_logger.log_warn(f"获取转协议预设详情失败: {e}")
+        return {"code": -1, "msg": f"获取失败: {str(e)}"}
+
+@app.post(
+    "/index/pyapi/addStreamProxy",
+    tags=["拉流代理"],
+    summary="添加拉流代理",
+)
+async def add_stream_proxy(request: Request):
+    """
+    添加拉流代理
+
+    参数：
+    - vhost: 虚拟主机，默认__defaultVhost__
+    - app: 应用名（必选）
+    - stream: 流ID（必选）
+    - url: 拉流地址（必选）
+    - on_demand: 按需拉流（bool，0/1）。为 1 时不立即调用 ZLMediaKit addStreamProxy，
+                 仅将配置写入数据库，等待有人播放时再由 ZLM 自动触发拉流。
+    - custom_params: 自定义参数（JSON字符串）
+    - protocol_params: 转协议参数（JSON字符串）
+    """
+    try:
+        body_bytes = await request.body()
+        if not body_bytes:
+            return {"code": -1, "msg": "请求体为空"}
+        
+        content_type = request.headers.get("content-type", "")
+        
+        if "application/json" in content_type or not content_type:
+            try:
+                data = json.loads(body_bytes.decode("utf-8"))
+            except:
+                data = {}
+        elif "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+            parsed = urllib.parse.parse_qs(body_bytes.decode("utf-8"), keep_blank_values=True)
+            data = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+        else:
+            try:
+                data = json.loads(body_bytes.decode("utf-8"))
+            except:
+                return {"code": -1, "msg": f"不支持的Content-Type: {content_type}"}
+        
+        if not isinstance(data, dict):
+            return {"code": -1, "msg": "参数格式错误"}
+        
+        vhost = data.get("vhost", "__defaultVhost__")
+        app = data.get("app")
+        stream = data.get("stream")
+        url = data.get("url")
+        
+        if not app or not stream or not url:
+            return {"code": -1, "msg": "app、stream、url参数不能为空"}
+        
+        custom_params = data.get("custom_params", "{}")
+        protocol_params = data.get("protocol_params", "{}")
+
+        # on_demand: 接受 bool / 0 / 1 / "0" / "1" / "true" / "false"
+        raw_on_demand = data.get("on_demand", 0)
+        if isinstance(raw_on_demand, str):
+            on_demand = raw_on_demand.lower() in ("1", "true", "yes")
+        else:
+            on_demand = bool(raw_on_demand)
+
+        if on_demand:
+            # 按需模式：直接写库，不调用 ZLM，等待播放时 ZLM 自动拉流
+            proxy_id = db.add_pull_proxy({
+                "vhost": vhost,
+                "app": app,
+                "stream": stream,
+                "url": url,
+                "custom_params": custom_params,
+                "protocol_params": protocol_params,
+                "on_demand": 1,
+            })
+            if proxy_id:
+                return {"code": 0, "msg": "添加成功（按需模式，未立即拉流）", "data": {"id": proxy_id}}
+            else:
+                return {"code": -1, "msg": "写入数据库失败，vhost/app/stream 组合可能已存在"}
+        
+        # 普通模式：先调用 ZLMediaKit 的 addStreamProxy 接口
+        zlm_url = f"{get_zlm_base_url()}/index/api/addStreamProxy"
+        zlm_params = {
+            "vhost": vhost,
+            "app": app,
+            "stream": stream,
+            "url": url
+        }
+        
+        # 添加自定义参数
+        if custom_params:
+            try:
+                custom_params_dict = json.loads(custom_params) if isinstance(custom_params, str) else custom_params
+                zlm_params.update(custom_params_dict)
+            except:
+                pass
+        
+        # 添加转协议参数
+        if protocol_params:
+            try:
+                protocol_params_dict = json.loads(protocol_params) if isinstance(protocol_params, str) else protocol_params
+                zlm_params.update(protocol_params_dict)
+            except:
+                pass
+        
+        # 透传客户端 cookie
+        response = await client.post(zlm_url, data=zlm_params, headers=get_forward_headers(request))
+        result = response.json()
+        
+        if result.get("code") == 0:
+            # 保存到数据库
+            db.add_pull_proxy({
+                "vhost": vhost,
+                "app": app,
+                "stream": stream,
+                "url": url,
+                "custom_params": custom_params,
+                "protocol_params": protocol_params,
+                "on_demand": 0,
+            })
+            return {"code": 0, "msg": "添加成功", "data": result.get("data")}
+        else:
+            return {"code": -1, "msg": result.get("msg", "添加失败")}
+    except Exception as e:
+        mk_logger.log_warn(f"添加拉流代理失败: {e}")
+        return {"code": -1, "msg": f"添加失败: {str(e)}"}
+
+@app.post(
+    "/index/pyapi/delStreamProxy",
+    tags=["拉流代理"],
+    summary="删除拉流代理",
+)
+async def del_stream_proxy(request: Request):
+    """
+    删除拉流代理
+
+    参数：
+    - id: 数据库记录的唯一 ID（必选）
+
+    流程：
+    1. 按 id 查询数据库，获取 vhost/app/stream
+    2. 组合 key = vhost/app/stream，调用 ZLMediaKit delStreamProxy（ZLM 侧不存在不报错）
+    3. 无论 ZLM 返回什么，都从数据库删除该记录
+    """
+    try:
+        body_bytes = await request.body()
+        if not body_bytes:
+            return {"code": -1, "msg": "请求体为空"}
+
+        content_type = request.headers.get("content-type", "")
+
+        if "application/json" in content_type or not content_type:
+            try:
+                data = json.loads(body_bytes.decode("utf-8"))
+            except:
+                data = {}
+        elif "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+            parsed = urllib.parse.parse_qs(body_bytes.decode("utf-8"), keep_blank_values=True)
+            data = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+        else:
+            try:
+                data = json.loads(body_bytes.decode("utf-8"))
+            except:
+                return {"code": -1, "msg": f"不支持的Content-Type: {content_type}"}
+
+        if not isinstance(data, dict):
+            return {"code": -1, "msg": "参数格式错误"}
+
+        proxy_id = data.get("id")
+        if not proxy_id:
+            return {"code": -1, "msg": "id 参数不能为空"}
+        try:
+            proxy_id = int(proxy_id)
+        except (ValueError, TypeError):
+            return {"code": -1, "msg": "id 格式错误，必须为整数"}
+
+        # 1. 查询数据库获取流信息
+        proxy = db.get_pull_proxy(proxy_id)
+        if not proxy:
+            return {"code": -1, "msg": "代理不存在"}
+
+        vhost  = proxy.get("vhost") or "__defaultVhost__"
+        app    = proxy.get("app") or ""
+        stream = proxy.get("stream") or ""
+        if not app or not stream:
+            return {"code": -1, "msg": "数据库记录异常：app/stream 为空"}
+        key    = f"{vhost}/{app}/{stream}"
+
+        # 2. 调用 ZLMediaKit delStreamProxy，ZLM 侧不存在时仅记录日志
+        try:
+            zlm_url = f"{get_zlm_base_url()}/index/api/delStreamProxy"
+            response = await client.post(
+                zlm_url,
+                data={"key": key},
+                headers=get_forward_headers(request),
+            )
+            zlm_result = response.json()
+            if zlm_result.get("code") != 0:
+                mk_logger.log_warn(
+                    f"ZLM delStreamProxy 返回非 0: {zlm_result.get('msg')}，key={key}"
+                )
+        except Exception as e:
+            mk_logger.log_warn(f"调用 ZLM delStreamProxy 失败（忽略）: {e}，key={key}")
+
+        # 3. 无论 ZLM 结果如何，删除数据库记录
+        db.delete_pull_proxy(vhost, app, stream)
+
+        return {"code": 0, "msg": "删除成功"}
+    except Exception as e:
+        mk_logger.log_warn(f"删除拉流代理失败: {e}")
+        return {"code": -1, "msg": f"删除失败: {str(e)}"}
+
+@app.get(
+    "/index/pyapi/getStreamProxyList",
+    tags=["拉流代理"],
+    summary="获取拉流代理列表",
+)
+async def get_stream_proxy_list():
+    """
+    获取拉流代理列表
+    """
+    try:
+        proxies = db.get_all_pull_proxies()
+        return {"code": 0, "msg": "获取成功", "data": proxies}
+    except Exception as e:
+        mk_logger.log_warn(f"获取拉流代理列表失败: {e}")
+        return {"code": -1, "msg": f"获取失败: {str(e)}"}
+
+@app.get(
+    "/index/pyapi/getStreamProxy",
+    tags=["拉流代理"],
+    summary="获取拉流代理详情",
+)
+async def get_stream_proxy(id: int = Query(..., description="代理ID")):
+    """
+    获取拉流代理详情
+    
+    参数：
+    - id: 代理ID（必选）
+    """
+    try:
+        proxy = db.get_pull_proxy(id)
+        if proxy:
+            return {"code": 0, "msg": "获取成功", "data": proxy}
+        else:
+            return {"code": -1, "msg": "代理不存在"}
+    except Exception as e:
+        mk_logger.log_warn(f"获取拉流代理详情失败: {e}")
         return {"code": -1, "msg": f"获取失败: {str(e)}"}

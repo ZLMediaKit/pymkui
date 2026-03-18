@@ -400,25 +400,28 @@ const Api = {
         return this.request(`/index/pyapi/get_protocol_options?id=${id}`, { method: 'GET' });
     },
 
+    async addStreamProxy(data) {
+        return this.request('/index/pyapi/addStreamProxy', { body: data });
+    },
+
+    async delStreamProxy(id) {
+        return this.request('/index/pyapi/delStreamProxy', { body: { id } });
+    },
+
+    async getStreamProxyList() {
+        return this.request('/index/pyapi/getStreamProxyList', { method: 'GET' });
+    },
+
+    async getStreamProxy(id) {
+        return this.request(`/index/pyapi/getStreamProxy?id=${id}`, { method: 'GET' });
+    },
+
     clearAuth() {
         this.cookie = '';
         localStorage.removeItem('serverUrl');
         localStorage.removeItem('cookie');
     }
 };
-
-function showToast(message, type = 'info', duration = 3000) {
-    const toast = document.getElementById('toast');
-    if (!toast) return;
-
-    toast.textContent = message;
-    toast.className = `toast ${type}`;
-    toast.classList.add('show');
-
-    setTimeout(() => {
-        toast.classList.remove('show');
-    }, duration);
-}
 
 async function checkAuth() {
     const currentPath = window.location.pathname;

@@ -12,12 +12,14 @@ import mk_logger
 class Database:
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path if db_path else config.DATABASE_PATH
-        self.connection = None
+        self.connection: sqlite3.Connection
+        self.cursor: sqlite3.Cursor
         self.init_db()
     
     def init_db(self):
         """Initialize database connection"""
         self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.connection.row_factory = sqlite3.Row
         self.cursor = self.connection.cursor()
         
         self._create_tables()
@@ -27,15 +29,24 @@ class Database:
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS pull_proxies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                vhost TEXT NOT NULL DEFAULT '__defaultVhost__',
                 app TEXT NOT NULL,
                 stream TEXT NOT NULL,
                 url TEXT NOT NULL,
-                enabled INTEGER DEFAULT 1,
+                custom_params TEXT,
+                protocol_params TEXT,
+                on_demand INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT current_timestamp,
                 updated_at TIMESTAMP DEFAULT current_timestamp,
-                UNIQUE(app, stream)
+                UNIQUE(vhost, app, stream)
             )
         ''')
+        # 兼容已有数据库：若旧表缺少 on_demand 列则补上
+        try:
+            self.cursor.execute('ALTER TABLE pull_proxies ADD COLUMN on_demand INTEGER DEFAULT 0')
+            self.connection.commit()
+        except Exception:
+            pass  # 列已存在，忽略
         
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS push_tasks (
@@ -98,9 +109,8 @@ class Database:
     
     def close(self):
         """Close database connection"""
-        if self.connection:
+        if hasattr(self, 'connection') and self.connection:
             self.connection.close()
-            self.connection = None
             mk_logger.log_info(f"Database connection closed")
     
     def add_proxy(self, app: str, stream: str, url: str, enabled: bool = True) -> Optional[Dict[str, Any]]:
@@ -111,7 +121,6 @@ class Database:
                 (app, stream, url, enabled)
             )
             self.connection.commit()
-            
             proxy_id = self.cursor.lastrowid
             return {
                 'id': proxy_id,
@@ -122,7 +131,6 @@ class Database:
                 'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
-            return proxy
         except sqlite3.IntegrityError as e:
             self.connection.rollback()
             raise Exception(f"Failed to add proxy: {e}")
@@ -157,7 +165,7 @@ class Database:
             proxies = []
             for row in self.cursor.fetchall():
                 proxies.append(dict(row))
-            return []
+            return proxies
         except sqlite3.Error as e:
             mk_logger.log_warn(f"Failed to get all proxies: {e}")
             return []
@@ -181,6 +189,7 @@ class Database:
                 self.cursor.execute(query, values)
                 self.connection.commit()
                 return True
+            return False
         except sqlite3.Error as e:
             mk_logger.log_warn(f"Failed to update proxy: {e}")
             return False
@@ -338,4 +347,83 @@ class Database:
             return True
         except sqlite3.Error as e:
             print(f"Failed to delete protocol option: {e}")
+            return False
+    
+    def add_pull_proxy(self, proxy_data: Dict[str, Any]) -> Optional[int]:
+        """Add a pull proxy"""
+        try:
+            self.cursor.execute(
+                'INSERT INTO pull_proxies (vhost, app, stream, url, custom_params, protocol_params, on_demand) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (proxy_data.get('vhost', '__defaultVhost__'),
+                 proxy_data.get('app'),
+                 proxy_data.get('stream'),
+                 proxy_data.get('url'),
+                 proxy_data.get('custom_params', '{}'),
+                 proxy_data.get('protocol_params', '{}'),
+                 int(bool(proxy_data.get('on_demand', 0))))
+            )
+            self.connection.commit()
+            return self.cursor.lastrowid
+        except sqlite3.IntegrityError as e:
+            mk_logger.log_warn(f"Failed to add pull proxy: {e}")
+            return None
+    
+    def get_pull_proxy(self, proxy_id: int) -> Optional[Dict[str, Any]]:
+        """Get pull proxy by ID"""
+        try:
+            self.cursor.execute('SELECT * FROM pull_proxies WHERE id = ?', (proxy_id,))
+            row = self.cursor.fetchone()
+            if row:
+                columns = [description[0] for description in self.cursor.description]
+                return dict(zip(columns, row))
+            return None
+        except sqlite3.Error as e:
+            print(f"Failed to get pull proxy: {e}")
+            return None
+    
+    def get_all_pull_proxies(self) -> List[Dict[str, Any]]:
+        """Get all pull proxies"""
+        try:
+            self.cursor.execute('SELECT * FROM pull_proxies ORDER BY created_at DESC')
+            rows = self.cursor.fetchall()
+            columns = [description[0] for description in self.cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
+        except sqlite3.Error as e:
+            print(f"Failed to get all pull proxies: {e}")
+            return []
+    
+    def update_pull_proxy(self, proxy_id: int, **kwargs) -> bool:
+        """Update pull proxy"""
+        try:
+            set_clause = []
+            values = []
+            
+            for key, value in kwargs.items():
+                if key in ['vhost', 'app', 'stream', 'url', 'custom_params', 'protocol_params', 'on_demand']:
+                    set_clause.append(f"{key} = ?")
+                    values.append(value)
+            
+            if set_clause:
+                set_clause.append("updated_at = ?")
+                values.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                values.append(proxy_id)
+                
+                query = f"UPDATE pull_proxies SET {', '.join(set_clause)} WHERE id = ?"
+                self.cursor.execute(query, values)
+                self.connection.commit()
+                return True
+            return False
+        except sqlite3.Error as e:
+            print(f"Failed to update pull proxy: {e}")
+            return False
+    
+    def delete_pull_proxy(self, vhost: str, app: str, stream: str) -> bool:
+        """Delete pull proxy by vhost, app, stream"""
+        try:
+            self.cursor.execute('DELETE FROM pull_proxies WHERE vhost = ? AND app = ? AND stream = ?', 
+                              (vhost, app, stream))
+            self.connection.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Failed to delete pull proxy: {e}")
             return False
