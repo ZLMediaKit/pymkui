@@ -102,9 +102,45 @@ ZLMediakit是一个高性能的流媒体服务器，支持RTSP、RTMP、HLS、HT
 
 ### 2. 安装Python依赖
 
+**前置要求**：需要安装 Python 3.14 或更高版本。
+
+**使用 pip（推荐）**：
+
 ```bash
 # 进入backend目录
 cd pymkui/backend
+
+# 安装依赖
+pip install -r requirements.txt
+```
+
+**使用 conda**：
+
+```bash
+# 进入backend目录
+cd pymkui/backend
+
+# 创建并激活 conda 环境（首次使用）
+conda create -n pymkui python=3.14
+conda activate pymkui
+
+# 安装依赖
+pip install -r requirements.txt
+```
+
+**使用 venv**：
+
+```bash
+# 进入backend目录
+cd pymkui/backend
+
+# 创建虚拟环境（首次使用）
+python -m venv venv
+
+# Windows 激活虚拟环境
+venv\Scripts\activate
+# Linux/Mac 激活虚拟环境
+# source venv/bin/activate
 
 # 安装依赖
 pip install -r requirements.txt
@@ -132,13 +168,52 @@ rootPath=/path/to/pymkui-main/frontend
 
 做法可以是以下两种之一：
 
-#### 做法 A：设置 `PYTHONPATH`
+#### 做法 A：设置 `PYTHONPATH`（推荐）
+
+**Linux/Mac 系统**：
 
 ```bash
 export PYTHONPATH=/path/to/pymkui-main/backend:$PYTHONPATH
 ```
 
-#### 做法 B：在 ZLMediaKit 的 `python/` 目录下建立软链接
+**Windows 系统设置 PYTHONPATH**：
+
+1. **临时设置**（当前命令行窗口有效）：
+
+```cmd
+set PYTHONPATH=G:\pymkui\backend;%PYTHONPATH%
+```
+
+或在 PowerShell 中：
+
+```powershell
+$env:PYTHONPATH="G:\pymkui\backend;$env:PYTHONPATH"
+```
+
+2. **永久设置**（系统环境变量）：
+
+   - 右键点击"此电脑" → "属性" → "高级系统设置" → "环境变量"
+   - 在"系统变量"或"用户变量"中查找 `PYTHONPATH`
+   - 如果不存在，点击"新建"：
+     - 变量名：`PYTHONPATH`
+     - 变量值：`G:\pymkui\backend`（替换为你的实际路径）
+   - 如果存在，点击"编辑"，在变量值前面添加 `G:\pymkui\backend;`
+
+3. **验证设置**：
+
+```cmd
+echo %PYTHONPATH%
+```
+
+或在 PowerShell 中：
+
+```powershell
+echo $env:PYTHONPATH
+```
+
+
+
+#### 做法 B：在 ZLMediaKit 的 `python/` 目录下建立软链接（Linux/Mac）
 
 例如：
 
@@ -151,6 +226,7 @@ ln -sf /path/to/pymkui-main/backend/config.py config.py
 ln -sf /path/to/pymkui-main/backend/mk_logger.py mk_logger.py
 ln -sf /path/to/pymkui-main/backend/shared_loop.py shared_loop.py
 ```
+> **推荐**：使用做法 A（设置 `PYTHONPATH`）更简单，不需要复制或创建链接。
 
 ### 5. 启动服务
 
