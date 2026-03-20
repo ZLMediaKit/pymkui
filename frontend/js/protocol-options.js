@@ -78,37 +78,28 @@ async function loadProtocolOptions() {
 }
 
 async function openAddModal() {
-    try {
-        const result = await Api.getServerConfig();
-        
-        if (result.code === 0 && result.data && result.data.length > 0) {
-            const serverConfig = result.data[0] || {};
-            
-            const protocolConfig = {};
-            for (const [key, value] of Object.entries(serverConfig)) {
-                if (key.startsWith('protocol.')) {
-                    const configKey = key.substring('protocol.'.length);
-                    protocolConfig[configKey] = value;
-                }
-            }
-            
-            showProtocolOptionsModal('新增协议预设', null, protocolConfig);
-        } else {
-            showProtocolOptionsModal('新增协议预设', null, {});
-        }
-    } catch (error) {
-        console.error('获取服务器配置失败:', error);
-        showProtocolOptionsModal('新增协议预设', null, {});
-    }
+    showProtocolOptionsModal('新增协议预设', null, {});
 }
 
 function editProtocolOption(id) {
-    Api.getProtocolOptions(id).then(result => {
-        if (result.code === 0) {
-            showProtocolOptionsModal('编辑协议预设', result.data);
-        } else {
-            showToast('获取配置失败: ' + (result.msg || '未知错误'), 'error');
+    // 同时获取预设详情和服务器默认配置，供"加载默认"按钮使用
+    Promise.all([
+        Api.getProtocolOptions(id),
+        Api.getServerConfig(),
+    ]).then(([detailResult, configResult]) => {
+        if (detailResult.code !== 0) {
+            showToast('获取配置失败: ' + (detailResult.msg || '未知错误'), 'error');
+            return;
         }
+        const serverConfig = {};
+        if (configResult.code === 0 && configResult.data && configResult.data.length > 0) {
+            for (const [key, value] of Object.entries(configResult.data[0] || {})) {
+                if (key.startsWith('protocol.')) {
+                    serverConfig[key.substring('protocol.'.length)] = value;
+                }
+            }
+        }
+        showProtocolOptionsModal('编辑协议预设', detailResult.data, serverConfig);
     }).catch(error => {
         showToast('获取配置失败: ' + error.message, 'error');
     });
@@ -143,9 +134,19 @@ function showProtocolOptionsModal(title, data, serverConfig = {}) {
         <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 border border-white/20 max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-xl font-bold text-white">${title}</h3>
-                <button class="text-white/60 hover:text-white" onclick="this.closest('.absolute').remove()">
-                    <i class="fa fa-times text-2xl"></i>
-                </button>
+                <div class="flex items-center gap-2">
+                    <button type="button" id="poLoadDefaultBtn"
+                        class="bg-white/10 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-white/20 transition-colors">
+                        <i class="fa fa-magic mr-1"></i>加载默认
+                    </button>
+                    <button type="button" id="poClearBtn"
+                        class="bg-red-500/20 text-red-400 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-red-500/30 transition-colors">
+                        <i class="fa fa-eraser mr-1"></i>清空
+                    </button>
+                    <button class="text-white/60 hover:text-white ml-1" onclick="this.closest('.absolute').remove()">
+                        <i class="fa fa-times text-2xl"></i>
+                    </button>
+                </div>
             </div>
             <form id="protocolOptionsForm" class="space-y-6">
                 <input type="hidden" id="optionId" value="${data ? data.id : ''}">
@@ -255,6 +256,58 @@ function showProtocolOptionsModal(title, data, serverConfig = {}) {
         if (e.target === modal) {
             modal.remove();
         }
+    });
+
+    // ---- 字段 id 列表（用于加载默认 / 清空）----
+    const _fieldMap = {
+        modifyStamp:    'modify_stamp',
+        enableAudio:    'enable_audio',
+        addMuteAudio:   'add_mute_audio',
+        autoClose:      'auto_close',
+        continuePushMs: 'continue_push_ms',
+        pacedSenderMs:  'paced_sender_ms',
+        enableHls:      'enable_hls',
+        enableHlsFmp4:  'enable_hls_fmp4',
+        enableMp4:      'enable_mp4',
+        enableRtsp:     'enable_rtsp',
+        enableRtmp:     'enable_rtmp',
+        enableTs:       'enable_ts',
+        enableFmp4:     'enable_fmp4',
+        hlsDemand:      'hls_demand',
+        rtspDemand:     'rtsp_demand',
+        rtmpDemand:     'rtmp_demand',
+        tsDemand:       'ts_demand',
+        fmp4Demand:     'fmp4_demand',
+        mp4AsPlayer:    'mp4_as_player',
+        mp4MaxSecond:   'mp4_max_second',
+        mp4SavePath:    'mp4_save_path',
+        hlsSavePath:    'hls_save_path',
+    };
+
+    // 加载默认：从 serverConfig 填入各字段
+    document.getElementById('poLoadDefaultBtn').addEventListener('click', function () {
+        let applied = 0;
+        Object.entries(_fieldMap).forEach(([domId, cfgKey]) => {
+            const el = document.getElementById(domId);
+            if (el && serverConfig[cfgKey] !== undefined && serverConfig[cfgKey] !== null) {
+                el.value = String(serverConfig[cfgKey]);
+                applied++;
+            }
+        });
+        if (applied > 0) {
+            showToast(`已加载 ${applied} 个服务器默认值`, 'success');
+        } else {
+            showToast('未获取到服务器默认值，请确认已连接服务器', 'warning');
+        }
+    });
+
+    // 清空：将所有字段（除名称外）重置为空
+    document.getElementById('poClearBtn').addEventListener('click', function () {
+        Object.keys(_fieldMap).forEach(domId => {
+            const el = document.getElementById(domId);
+            if (el) el.value = '';
+        });
+        showToast('已清空所有协议参数', 'info');
     });
     
     document.getElementById('protocolOptionsForm').addEventListener('submit', async function(e) {
