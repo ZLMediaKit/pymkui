@@ -82,24 +82,12 @@ async function openAddModal() {
 }
 
 function editProtocolOption(id) {
-    // 同时获取预设详情和服务器默认配置，供"加载默认"按钮使用
-    Promise.all([
-        Api.getProtocolOptions(id),
-        Api.getServerConfig(),
-    ]).then(([detailResult, configResult]) => {
-        if (detailResult.code !== 0) {
-            showToast('获取配置失败: ' + (detailResult.msg || '未知错误'), 'error');
+    Api.getProtocolOptions(id).then(result => {
+        if (result.code !== 0) {
+            showToast('获取配置失败: ' + (result.msg || '未知错误'), 'error');
             return;
         }
-        const serverConfig = {};
-        if (configResult.code === 0 && configResult.data && configResult.data.length > 0) {
-            for (const [key, value] of Object.entries(configResult.data[0] || {})) {
-                if (key.startsWith('protocol.')) {
-                    serverConfig[key.substring('protocol.'.length)] = value;
-                }
-            }
-        }
-        showProtocolOptionsModal('编辑协议预设', detailResult.data, serverConfig);
+        showProtocolOptionsModal('编辑协议预设', result.data);
     }).catch(error => {
         showToast('获取配置失败: ' + error.message, 'error');
     });
@@ -284,20 +272,43 @@ function showProtocolOptionsModal(title, data, serverConfig = {}) {
         hlsSavePath:    'hls_save_path',
     };
 
-    // 加载默认：从 serverConfig 填入各字段
-    document.getElementById('poLoadDefaultBtn').addEventListener('click', function () {
-        let applied = 0;
-        Object.entries(_fieldMap).forEach(([domId, cfgKey]) => {
-            const el = document.getElementById(domId);
-            if (el && serverConfig[cfgKey] !== undefined && serverConfig[cfgKey] !== null) {
-                el.value = String(serverConfig[cfgKey]);
-                applied++;
+    // 加载默认：实时请求服务器配置后填入各字段
+    document.getElementById('poLoadDefaultBtn').addEventListener('click', async function () {
+        const btn = this;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa fa-spinner fa-spin mr-1"></i>加载中...';
+        try {
+            const result = await Api.getServerConfig();
+            if (result.code === 0 && result.data && result.data.length > 0) {
+                const raw = result.data[0] || {};
+                // 提取 protocol.xxx 键值
+                const cfg = {};
+                for (const [key, value] of Object.entries(raw)) {
+                    if (key.startsWith('protocol.')) {
+                        cfg[key.substring('protocol.'.length)] = value;
+                    }
+                }
+                let applied = 0;
+                Object.entries(_fieldMap).forEach(([domId, cfgKey]) => {
+                    const el = document.getElementById(domId);
+                    if (el && cfg[cfgKey] !== undefined && cfg[cfgKey] !== null) {
+                        el.value = String(cfg[cfgKey]);
+                        applied++;
+                    }
+                });
+                if (applied > 0) {
+                    showToast(`已加载 ${applied} 个服务器默认值`, 'success');
+                } else {
+                    showToast('服务器未返回 protocol.* 配置', 'warning');
+                }
+            } else {
+                showToast('获取服务器配置失败: ' + (result.msg || '未知错误'), 'error');
             }
-        });
-        if (applied > 0) {
-            showToast(`已加载 ${applied} 个服务器默认值`, 'success');
-        } else {
-            showToast('未获取到服务器默认值，请确认已连接服务器', 'warning');
+        } catch (e) {
+            showToast('获取服务器配置失败: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa fa-magic mr-1"></i>加载默认';
         }
     });
 
