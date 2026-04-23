@@ -377,7 +377,8 @@ const Api = {
         const params = new URLSearchParams({
             url: url,
             timeout_sec: timeoutSec,
-            expire_sec: expireSec
+            expire_sec: expireSec,
+            async: 1
         });
         
         try {

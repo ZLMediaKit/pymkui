@@ -396,6 +396,20 @@ async function showStreamInfo(schema, vhost, app, stream) {
         const snapUrlParams = await fetchPlayUrlParams(app, stream);
         const playUrl = generatePlayUrl(app, stream, schema, snapUrlParams);
 
+        // 截图用 URL：rtsp 改用 rtmp 协议的 flv 地址，并追加 self=1
+        const baseUrl = Api.getBaseUrl();
+        let snapUrl;
+        if (schema === 'rtsp') {
+            snapUrl = `${baseUrl}/${app}/${stream}.live.flv`;
+            if (snapUrlParams) {
+                const qs = new URLSearchParams(snapUrlParams).toString();
+                if (qs) snapUrl += '?' + qs;
+            }
+        } else {
+            snapUrl = playUrl;
+        }
+        snapUrl += (snapUrl.includes('?') ? '&' : '?') + 'self=1';
+
         // 填充播放地址
         const playUrlContainer = document.getElementById('stream-playurl-container');
         if (playUrlContainer) {
@@ -412,7 +426,7 @@ async function showStreamInfo(schema, vhost, app, stream) {
 
         const snapContainer = document.getElementById('stream-snap-container');
         if (snapContainer) {
-            await getStreamSnap(playUrl, snapContainer);
+            await getStreamSnap(snapUrl, snapContainer);
         }
         
     } catch (error) {
