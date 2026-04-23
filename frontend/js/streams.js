@@ -118,6 +118,7 @@ async function loadStreams() {
                             <button class="bg-gradient-primary text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors mr-2" onclick="playStream('${stream.app}', '${stream.stream}', '${stream.schema}')">播放</button>
                             <button class="bg-gradient-accent text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors mr-2" onclick="showStreamInfo('${stream.schema}', '${vhost}', '${stream.app}', '${stream.stream}')">查看</button>
                             <button class="bg-blue-500 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors mr-2" onclick="showStreamPlayers('${stream.schema}', '${vhost}', '${stream.app}', '${stream.stream}')">观众</button>
+                            <button class="bg-yellow-500 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors mr-2" onclick="copyStreamUrl('${stream.app}', '${stream.stream}', '${stream.schema}')">拷贝地址</button>
                             <button class="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors" onclick="stopStream('${stream.schema}', '${vhost}', '${stream.app}', '${stream.stream}')">停止</button>
                         </td>
                     </tr>
@@ -201,6 +202,8 @@ function generatePlayUrl(app, stream, schema, extraParams) {
         playUrl = `${baseUrl}/${app}/${stream}.live.ts`;
     } else if (schema === 'fmp4') {
         playUrl = `${baseUrl}/${app}/${stream}.live.mp4`;
+    } else if (schema === 'rtsp') {
+        playUrl = `${baseUrl}/index/api/whep?app=${encodeURIComponent(app)}&stream=${encodeURIComponent(stream)}`;
     } else {
         playUrl = `${baseUrl}/${app}/${stream}.live.flv`;
     }
@@ -626,8 +629,7 @@ async function playWithWHEP(app, stream) {
         await peerConnection.setLocalDescription(offer);
         
         const whepUrlParams = await fetchPlayUrlParams(app, stream);
-        const whepBaseUrl = `${Api.getBaseUrl()}/index/api/whep?app=${encodeURIComponent(app)}&stream=${encodeURIComponent(stream)}`;
-        const whepUrl = whepUrlParams ? whepBaseUrl + '&' + new URLSearchParams(whepUrlParams).toString() : whepBaseUrl;
+        const whepUrl = generatePlayUrl(app, stream, 'rtsp', whepUrlParams);
         console.log('发送WHEP请求到:', whepUrl);
         
         const response = await fetch(whepUrl, {
@@ -1002,6 +1004,24 @@ function showSnapModal(imageUrl) {
             modal.remove();
         }
     });
+}
+
+async function copyStreamUrl(app, stream, schema) {
+    const urlParams = await fetchPlayUrlParams(app, stream);
+    const url = generatePlayUrl(app, stream, schema, urlParams);
+    try {
+        await navigator.clipboard.writeText(url);
+        showToast('地址已拷贝到剪贴板', 'success');
+    } catch (e) {
+        // 降级方案
+        const input = document.createElement('input');
+        input.value = url;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+        showToast('地址已拷贝到剪贴板', 'success');
+    }
 }
 
 async function stopStream(schema, vhost, app, stream) {
