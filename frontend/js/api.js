@@ -354,6 +354,16 @@ const Api = {
         return this.request('/index/api/close_stream', { body: { schema, vhost, app, stream, force: 1 } });
     },
 
+    async startRecord(type, vhost, app, stream) {
+        // type: 0=hls, 1=mp4
+        return this.request('/index/api/startRecord', { body: { type, vhost, app, stream } });
+    },
+
+    async stopRecord(type, vhost, app, stream) {
+        // type: 0=hls, 1=mp4
+        return this.request('/index/api/stopRecord', { body: { type, vhost, app, stream } });
+    },
+
     async getMediaPlayerList(schema, vhost, app, stream) {
         return this.request('/index/api/getMediaPlayerList', { body: { schema, vhost, app, stream } });
     },

@@ -116,10 +116,7 @@ async function loadStreams() {
                         <td class="p-4 text-white" style="white-space: pre-line;">${tracksInfo}</td>
                         <td class="p-4">
                             <button class="bg-gradient-primary text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors mr-2" onclick="playStream('${stream.app}', '${stream.stream}', '${stream.schema}')">播放</button>
-                            <button class="bg-gradient-accent text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors mr-2" onclick="showStreamInfo('${stream.schema}', '${vhost}', '${stream.app}', '${stream.stream}')">查看</button>
-                            <button class="bg-blue-500 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors mr-2" onclick="showStreamPlayers('${stream.schema}', '${vhost}', '${stream.app}', '${stream.stream}')">观众</button>
-                            <button class="bg-yellow-500 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors mr-2" onclick="copyStreamUrl('${stream.app}', '${stream.stream}', '${stream.schema}')">拷贝地址</button>
-                            <button class="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors" onclick="stopStream('${stream.schema}', '${vhost}', '${stream.app}', '${stream.stream}')">停止</button>
+                            <button class="bg-gradient-accent text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors" onclick="showStreamInfo('${stream.schema}', '${vhost}', '${stream.app}', '${stream.stream}')">查看</button>
                         </td>
                     </tr>
                 `;
@@ -361,21 +358,29 @@ async function showStreamInfo(schema, vhost, app, stream) {
         modal.className = 'absolute inset-0 bg-black/80 flex items-center justify-center overflow-y-auto pointer-events-auto';
         modal.setAttribute('data-modal', 'streams');
         modal.innerHTML = `
-            <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 my-8 border border-white/20" onclick="event.stopPropagation()">
-                <div class="flex justify-between items-center mb-4">
+            <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 my-8 border border-white/20 flex flex-col" style="max-height:90vh;" onclick="event.stopPropagation()">
+                <div class="flex justify-between items-center mb-4 shrink-0">
                     <h3 class="text-xl font-bold text-white">流信息: ${app}/${stream}</h3>
                     <button class="text-white/60 hover:text-white" onclick="this.closest('.absolute').remove()">
                         <i class="fa fa-times text-2xl"></i>
                     </button>
                 </div>
-                <div class="space-y-4 max-h-[70vh] overflow-y-auto">
+                <div class="space-y-4 overflow-y-auto flex-1 min-h-0">
                     <div class="bg-white/5 rounded-lg p-4">
                         <h4 class="text-lg font-semibold text-white mb-3 border-b border-white/10 pb-2">流截图</h4>
                         <div class="flex items-center justify-center h-48 bg-white/5 rounded-lg" id="stream-snap-container">
                             <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary"></div>
                         </div>
                     </div>
-                    ${renderStreamInfo(data)}
+                    <div class="bg-white/5 rounded-lg p-4" id="stream-playurl-container">
+                        <h4 class="text-lg font-semibold text-white mb-3 border-b border-white/10 pb-2">播放地址</h4>
+                        <div class="flex items-center gap-2 text-sm text-white/40"><i class="fa fa-spinner fa-spin"></i> 加载中...</div>
+                    </div>
+                    ${renderStreamInfo(data, vhost, app, stream)}
+                </div>
+                <div class="flex justify-end gap-2 pt-4 mt-2 border-t border-white/10 shrink-0">
+                    <button class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors" onclick="showStreamPlayers('${schema}', '${vhost}', '${app}', '${stream}')"><i class="fa fa-users mr-1"></i>观众</button>
+                    <button class="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors" onclick="stopStream('${schema}', '${vhost}', '${app}', '${stream}')"><i class="fa fa-stop mr-1"></i>停止</button>
                 </div>
             </div>
         `;
@@ -390,6 +395,21 @@ async function showStreamInfo(schema, vhost, app, stream) {
         // 获取截图并显示
         const snapUrlParams = await fetchPlayUrlParams(app, stream);
         const playUrl = generatePlayUrl(app, stream, schema, snapUrlParams);
+
+        // 填充播放地址
+        const playUrlContainer = document.getElementById('stream-playurl-container');
+        if (playUrlContainer) {
+            playUrlContainer.innerHTML = `
+                <h4 class="text-lg font-semibold text-white mb-3 border-b border-white/10 pb-2">播放地址</h4>
+                <div class="flex items-center gap-2 text-sm">
+                    <span class="text-white/80 break-all flex-1 font-mono bg-black/30 rounded px-3 py-2 select-all">${playUrl}</span>
+                    <button class="shrink-0 bg-yellow-500 hover:bg-yellow-400 text-white px-3 py-2 rounded-lg font-semibold transition-colors" onclick="navigator.clipboard.writeText('${playUrl.replace(/'/g, "\\'")}').then(()=>showToast('已复制到剪贴板','success')).catch(()=>showToast('复制失败','error'))">
+                        <i class="fa fa-copy mr-1"></i>拷贝
+                    </button>
+                </div>
+            `;
+        }
+
         const snapContainer = document.getElementById('stream-snap-container');
         if (snapContainer) {
             await getStreamSnap(playUrl, snapContainer);
@@ -401,7 +421,7 @@ async function showStreamInfo(schema, vhost, app, stream) {
     }
 }
 
-function renderStreamInfo(data) {
+function renderStreamInfo(data, vhost, app, stream) {
     let html = '';
     
     html += `
@@ -482,12 +502,29 @@ function renderStreamInfo(data) {
     }
     
     if (data.isRecordingHLS !== undefined || data.isRecordingMP4 !== undefined) {
+        const hlsRecording = !!data.isRecordingHLS;
+        const mp4Recording = !!data.isRecordingMP4;
+        const v = vhost, a = app, s = stream;
         html += `
             <div class="bg-white/5 rounded-lg p-4">
                 <h4 class="text-lg font-semibold text-white mb-3 border-b border-white/10 pb-2">录制状态</h4>
-                <div class="grid grid-cols-2 gap-3 text-sm">
-                    <div><span class="text-white/60">HLS录制:</span> <span class="text-white">${data.isRecordingHLS ? '是' : '否'}</span></div>
-                    <div><span class="text-white/60">MP4录制:</span> <span class="text-white">${data.isRecordingMP4 ? '是' : '否'}</span></div>
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div class="flex items-center gap-3">
+                        <span class="text-white/60">HLS:</span>
+                        <span class="text-white mr-1">${hlsRecording ? '<span class="text-green-400">录制中</span>' : '<span class="text-white/40">未录制</span>'}</span>
+                        ${hlsRecording
+                            ? `<button class="bg-red-500 hover:bg-red-400 text-white px-3 py-1 rounded-lg text-xs font-semibold transition-colors" onclick="toggleRecord(0,'${v}','${a}','${s}',false,this)"><i class="fa fa-stop mr-1"></i>停止</button>`
+                            : `<button class="bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded-lg text-xs font-semibold transition-colors" onclick="toggleRecord(0,'${v}','${a}','${s}',true,this)"><i class="fa fa-circle mr-1"></i>开始</button>`
+                        }
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-white/60">MP4:</span>
+                        <span class="text-white mr-1">${mp4Recording ? '<span class="text-green-400">录制中</span>' : '<span class="text-white/40">未录制</span>'}</span>
+                        ${mp4Recording
+                            ? `<button class="bg-red-500 hover:bg-red-400 text-white px-3 py-1 rounded-lg text-xs font-semibold transition-colors" onclick="toggleRecord(1,'${v}','${a}','${s}',false,this)"><i class="fa fa-stop mr-1"></i>停止</button>`
+                            : `<button class="bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded-lg text-xs font-semibold transition-colors" onclick="toggleRecord(1,'${v}','${a}','${s}',true,this)"><i class="fa fa-circle mr-1"></i>开始</button>`
+                        }
+                    </div>
                 </div>
             </div>
         `;
@@ -1021,6 +1058,49 @@ async function copyStreamUrl(app, stream, schema) {
         document.execCommand('copy');
         document.body.removeChild(input);
         showToast('地址已拷贝到剪贴板', 'success');
+    }
+}
+
+async function toggleRecord(type, vhost, app, stream, start, btn) {
+    // type: 0=hls, 1=mp4; start: true=开始录制, false=停止录制
+    const typeName = type === 0 ? 'HLS' : 'MP4';
+    try {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa fa-spinner fa-spin mr-1"></i>处理中...';
+        let result;
+        if (start) {
+            result = await Api.startRecord(type, vhost, app, stream);
+        } else {
+            result = await Api.stopRecord(type, vhost, app, stream);
+        }
+        if (result.code === 0 && result.result !== false) {
+            showToast(`${typeName}录制已${start ? '开始' : '停止'}`, 'success');
+            // 切换按钮状态
+            const isNowRecording = start;
+            btn.className = isNowRecording
+                ? 'bg-red-500 hover:bg-red-400 text-white px-3 py-1 rounded-lg text-xs font-semibold transition-colors'
+                : 'bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded-lg text-xs font-semibold transition-colors';
+            btn.innerHTML = isNowRecording
+                ? '<i class="fa fa-stop mr-1"></i>停止'
+                : '<i class="fa fa-circle mr-1"></i>开始';
+            btn.setAttribute('onclick', `toggleRecord(${type},'${vhost}','${app}','${stream}',${!isNowRecording},this)`);
+            btn.disabled = false;
+            // 更新状态文字
+            const statusSpan = btn.parentElement.querySelector('span.text-white span');
+            if (statusSpan) {
+                statusSpan.className = isNowRecording ? 'text-green-400' : 'text-white/40';
+                statusSpan.textContent = isNowRecording ? '录制中' : '未录制';
+            }
+        } else {
+            showToast(`${typeName}录制${start ? '开始' : '停止'}失败: ${result.msg || '未知错误'}`, 'error');
+            btn.disabled = false;
+            btn.innerHTML = start
+                ? '<i class="fa fa-circle mr-1"></i>开始'
+                : '<i class="fa fa-stop mr-1"></i>停止';
+        }
+    } catch (error) {
+        showToast(`操作失败: ${error.message}`, 'error');
+        btn.disabled = false;
     }
 }
 
