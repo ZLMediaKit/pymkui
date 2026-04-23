@@ -187,7 +187,7 @@ function formatBitrate(bytesPerSecond) {
     }
 }
 
-function generatePlayUrl(app, stream, schema) {
+function generatePlayUrl(app, stream, schema, extraParams) {
     const baseUrl = Api.getBaseUrl();
     let playUrl = '';
     
@@ -205,20 +205,42 @@ function generatePlayUrl(app, stream, schema) {
         playUrl = `${baseUrl}/${app}/${stream}.live.flv`;
     }
     
+    if (extraParams && typeof extraParams === 'object') {
+        const qs = new URLSearchParams(extraParams).toString();
+        if (qs) {
+            playUrl += (playUrl.includes('?') ? '&' : '?') + qs;
+        }
+    }
+    
     return playUrl;
 }
 
-function playStream(app, stream, schema) {
+async function fetchPlayUrlParams(app, stream) {
+    try {
+        const result = await Api.getPluginUrlParams('on_play', app, stream);
+        if (result.code === 0 && result.data && Object.keys(result.data).length > 0) {
+            return result.data;
+        }
+    } catch (e) {
+        console.warn('获取播放URL附加参数失败，以默认模式播放:', e);
+    }
+    return null;
+}
+
+async function playStream(app, stream, schema) {
     console.log('播放流:', app, stream, schema);
     
     if (schema === 'rtsp') {
         playWithWHEP(app, stream);
     } else if (schema === 'fmp4') {
-        playWithNative(app, stream, schema);
+        const urlParams = await fetchPlayUrlParams(app, stream);
+        playWithNative(app, stream, schema, urlParams);
     } else if (schema === 'rtmp') {
-        playWithJessibuca(app, stream, schema);
+        const urlParams = await fetchPlayUrlParams(app, stream);
+        playWithJessibuca(app, stream, schema, urlParams);
     } else if (schema === 'hls' || schema === 'hls.fmp4') {
-        playWithNative(app, stream, schema);
+        const urlParams = await fetchPlayUrlParams(app, stream);
+        playWithNative(app, stream, schema, urlParams);
     } else if (schema === 'ts') {
         showToast('TS协议暂不支持播放', 'error');
     } else {
@@ -226,7 +248,7 @@ function playStream(app, stream, schema) {
     }
 }
 
-function playWithNative(app, stream, schema) {
+function playWithNative(app, stream, schema, urlParams) {
     try {
         const modal = document.createElement('div');
         modal.className = 'absolute inset-0 bg-black/80 flex items-center justify-center pointer-events-auto';
@@ -249,7 +271,7 @@ function playWithNative(app, stream, schema) {
         `;
         document.getElementById('streams-modal-container').appendChild(modal);
         
-        const playUrl = generatePlayUrl(app, stream, schema);
+        const playUrl = generatePlayUrl(app, stream, schema, urlParams);
         
         console.log('原生播放URL:', playUrl);
         
@@ -363,7 +385,8 @@ async function showStreamInfo(schema, vhost, app, stream) {
         });
         
         // 获取截图并显示
-        const playUrl = generatePlayUrl(app, stream, schema);
+        const snapUrlParams = await fetchPlayUrlParams(app, stream);
+        const playUrl = generatePlayUrl(app, stream, schema, snapUrlParams);
         const snapContainer = document.getElementById('stream-snap-container');
         if (snapContainer) {
             await getStreamSnap(playUrl, snapContainer);
@@ -602,7 +625,9 @@ async function playWithWHEP(app, stream) {
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
         
-        const whepUrl = `${Api.getBaseUrl()}/index/api/whep?app=${encodeURIComponent(app)}&stream=${encodeURIComponent(stream)}`;
+        const whepUrlParams = await fetchPlayUrlParams(app, stream);
+        const whepBaseUrl = `${Api.getBaseUrl()}/index/api/whep?app=${encodeURIComponent(app)}&stream=${encodeURIComponent(stream)}`;
+        const whepUrl = whepUrlParams ? whepBaseUrl + '&' + new URLSearchParams(whepUrlParams).toString() : whepBaseUrl;
         console.log('发送WHEP请求到:', whepUrl);
         
         const response = await fetch(whepUrl, {
@@ -637,7 +662,7 @@ async function playWithWHEP(app, stream) {
     }
 }
 
-function playWithJessibuca(app, stream, schema) {
+function playWithJessibuca(app, stream, schema, urlParams) {
     try {
         const modal = document.createElement('div');
         modal.className = 'absolute inset-0 bg-black/80 flex items-center justify-center pointer-events-auto';
@@ -660,7 +685,7 @@ function playWithJessibuca(app, stream, schema) {
         `;
         document.getElementById('streams-modal-container').appendChild(modal);
         
-        const playUrl = generatePlayUrl(app, stream, schema);
+        const playUrl = generatePlayUrl(app, stream, schema, urlParams);
         
         console.log('Jessibuca播放URL:', playUrl);
         

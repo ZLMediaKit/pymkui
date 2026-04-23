@@ -389,6 +389,11 @@ const Api = {
         }
     },
 
+    async getPluginUrlParams(eventType, app, stream, vhost = '__defaultVhost__') {
+        const params = new URLSearchParams({ event_type: eventType, app, stream, vhost });
+        return this.request(`/index/pyapi/plugin/url_params?${params.toString()}`, { method: 'GET' });
+    },
+
     async addProtocolOptions(data) {
         return this.request('/index/pyapi/add_protocol_options', { body: data });
     },

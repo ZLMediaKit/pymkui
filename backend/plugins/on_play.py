@@ -46,7 +46,7 @@ class PluginOnPlay(PluginBase):
             mk_loader.play_auth_invoker_do(invoker, "")
         return True
 
-    def before_run(self, **kwargs):
+    def get_url_params(self, **kwargs) -> dict:
         vhost  = kwargs.get("vhost", "__defaultVhost__")
         app    = kwargs.get("app", "")
         stream = kwargs.get("stream", "")
@@ -54,10 +54,11 @@ class PluginOnPlay(PluginBase):
         expire_seconds    = int(binding_params.get("expire_seconds", 300))
         token_length      = int(binding_params.get("token_length", 16))
         token_usage_count = int(binding_params.get("token_usage_count", -1))
-        return self.get_token(vhost, app, stream,
-                              expire_seconds=expire_seconds,
-                              token_length=token_length,
-                              token_usage_count=token_usage_count)
+        token = self.get_token(vhost, app, stream,
+                               expire_seconds=expire_seconds,
+                               token_length=token_length,
+                               token_usage_count=token_usage_count)
+        return {"token": token}
     
     def params(self) -> dict:
         return {

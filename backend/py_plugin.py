@@ -39,11 +39,16 @@ class PluginBase:
     #                   适用于日志记录、消息推送、写库等不影响业务流程的旁路处理
     exclusive = True
 
-    def before_run(self, **kwargs):
-        raise NotImplementedError
+    def get_url_params(self, **kwargs) -> dict:
+        """
+        可选方法，在播放 URL 生成前调用，返回需要附加到播放 URL 的查询参数 dict。
+        例如鉴权插件返回 {"token": "xxx"}，前端将其拼接到播放 URL 中。
+        默认返回空 dict，子类按需覆盖。
+        """
+        return {}
 
     def run(self, **kwargs):
-        raise NotImplementedError
+        return False
     
     def params(self) -> dict:
         """
@@ -190,6 +195,35 @@ class PluginRegistry:
             return dict(self._bindings)
 
     # ── 事件分发 ──────────────────────────────────────────────────
+
+    def collect_url_params(self, event_type: str, **kwargs) -> dict:
+        """
+        收集绑定到 event_type 的所有插件的播放 URL 附加参数。
+
+        遍历该事件下所有已启用的插件，依次调用 get_url_params()，
+        将返回的 dict 合并后返回（后面的插件可覆盖前面的同名 key）。
+        插件不实现 get_url_params 或返回空时跳过。
+        """
+        with self._lock:
+            items = list(self._bindings.get(event_type, []))
+
+        merged: dict = {}
+        for item in items:
+            name   = item.get("name", "")
+            params = item.get("params") or {}
+            with self._lock:
+                plugin = self._plugins.get(name)
+            if plugin is None:
+                continue
+            try:
+                extra = plugin.get_url_params(**kwargs, binding_params=params)
+                if isinstance(extra, dict) and extra:
+                    merged.update(extra)
+            except Exception as e:
+                mk_logger.log_warn(
+                    f"[PluginRegistry] 插件 [{name}] collect_url_params 异常: {e}"
+                )
+        return merged
 
     def dispatch(self, event_type: str, **kwargs) -> bool:
         """

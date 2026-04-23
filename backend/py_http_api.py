@@ -1204,3 +1204,39 @@ def _sync_bindings_from_db_for_event(event_type: str):
         _py_plugin.registry.set_bindings(event_type, active)
     except Exception as e:
         mk_logger.log_warn(f"[plugin] 同步单事件绑定失败 {event_type}: {e}")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 插件 URL 参数接口
+# ──────────────────────────────────────────────────────────────────────
+
+@app.get(
+    "/index/pyapi/plugin/url_params",
+    tags=["插件管理"],
+    summary="获取插件为指定流生成的 URL 附加参数",
+)
+async def get_plugin_url_params(
+    event_type: str = Query(..., description="事件类型，如 on_play、on_publish"),
+    app: str = Query(..., description="应用名"),
+    stream: str = Query(..., description="流ID"),
+    vhost: str = Query(default="__defaultVhost__", description="虚拟主机"),
+):
+    """
+    收集指定事件（on_play / on_publish 等）下所有已启用插件为当前流生成的 URL 附加参数。
+
+    返回 data 为 dict，前端直接将其中的所有键值对追加到对应 URL 的查询参数中即可。
+    若该事件下无任何插件绑定或插件均不提供参数，data 为空 dict {}。
+    """
+    try:
+        if event_type not in _py_plugin.SUPPORTED_EVENTS:
+            return {"code": -1, "msg": f"不支持的事件类型: {event_type}"}
+        extra = _py_plugin.registry.collect_url_params(
+            event_type,
+            vhost=vhost,
+            app=app,
+            stream=stream,
+        )
+        return {"code": 0, "data": extra}
+    except Exception as e:
+        mk_logger.log_warn(f"get_plugin_url_params error: {e}")
+        return {"code": -1, "msg": str(e)}
