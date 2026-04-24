@@ -144,6 +144,7 @@ class Database:
             ("on_stream_not_found",    "pull_proxy_on_demand",  "{}", 0, 1),
             ("on_player_proxy_failed", "pull_proxy_failover",   "{}", 0, 1),
             ("on_start",               "pull_proxy_restore",    "{}", 0, 1),
+            ("on_http_access",         "http_access_frontend",  "{}", 0, 1),
         ]
         for event_type, plugin_name, params, priority, enabled in defaults:
             self.cursor.execute(

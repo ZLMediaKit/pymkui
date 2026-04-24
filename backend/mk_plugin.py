@@ -234,18 +234,11 @@ def on_stream_not_found(args: dict, sender: dict, invoker) -> bool:
 
 
 def on_http_access(parser: mk_loader.Parser, path: str, file_path: str, is_dir: bool, invoker, sender: dict) -> bool:
-    # 获取frontend目录的绝对路径
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    frontend_path = os.path.abspath(os.path.join(current_dir, '..', 'frontend'))
-    # 检查请求路径是否在frontend目录下
-    if not file_path.startswith(frontend_path):
-        mk_logger.log_warn(f"Access denied: path '{file_path}' is outside frontend directory")
-        mk_loader.http_access_invoker_do(invoker, "Access denied by pymkui", path, 60 * 60)
-        return True
-    
-    # 允许访问
-    mk_loader.http_access_invoker_do(invoker, "", path, 60 * 60)
-    return True
+    return py_plugin.registry.dispatch(
+        "on_http_access",
+        parser=parser, path=path, file_path=file_path,
+        is_dir=is_dir, invoker=invoker, sender=sender,
+    )
 
 def on_player_proxy_failed(url: str, media_tuple: mk_loader.MediaTuple, ex: mk_loader.SockException) -> bool:
     mk_logger.log_info(f"on_player_proxy_failed: {url}, {media_tuple.shortUrl()}, {ex.what()}")
