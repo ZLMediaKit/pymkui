@@ -152,3 +152,79 @@ class PullProxyFailover(PluginBase):
             mk_logger.log_warn(f"[pull_proxy_failover] 多地址切换异常: {e}")
 
         return False
+
+
+class PullProxyRestore(PluginBase):
+    """
+    启动恢复插件（on_start）
+    ZLMediaKit 启动时，从数据库读取所有 on_demand=0 的拉流代理，
+    调用 mk_loader.add_stream_proxy 重新注册，恢复上次运行状态。
+    非独占，允许其他 on_start 插件同时运行。
+    """
+    name = "pull_proxy_restore"
+    version = "1.0.0"
+    description = "启动时自动恢复非按需拉流代理。默认启用，不建议禁用。"
+    type = "on_start"
+    exclusive = False
+
+    def run(self, **kwargs) -> bool:
+        import mk_plugin as _mk
+        from py_http_api import db
+
+        try:
+            proxies = db.get_all_pull_proxies()
+        except Exception as e:
+            mk_logger.log_warn(f"[pull_proxy_restore] 读取数据库失败: {e}")
+            return False
+
+        count = 0
+        for proxy in proxies:
+            if proxy.get("on_demand", 0):
+                continue
+
+            proxy_id = proxy.get("id")
+            vhost  = proxy.get("vhost")  or "__defaultVhost__"
+            app    = proxy.get("app",    "")
+            stream = proxy.get("stream", "")
+
+            proxy_urls = db.get_proxy_urls(proxy_id)
+            first_url  = proxy_urls[0] if proxy_urls else {}
+            url        = first_url.get("url", "")
+            url_params = first_url.get("params", {})
+
+            if not app or not stream or not url:
+                mk_logger.log_warn(f"[pull_proxy_restore] 跳过无效记录 id={proxy_id}")
+                continue
+
+            vhost, app, stream, url, retry_count, timeout_sec, opt = _mk._build_proxy_call_args(
+                proxy, url, url_params
+            )
+
+            def make_cb(pid, v, a, s, u):
+                def cb(err, key):
+                    if err:
+                        mk_logger.log_warn(
+                            f"[pull_proxy_restore] 恢复失败 id={pid} {v}/{a}/{s}: {err}"
+                        )
+                    else:
+                        mk_logger.log_info(
+                            f"[pull_proxy_restore] 恢复成功 id={pid} {v}/{a}/{s} url={u}"
+                        )
+                return cb
+
+            mk_logger.log_info(
+                f"[pull_proxy_restore] 恢复拉流代理 id={proxy_id} {vhost}/{app}/{stream} url={url} "
+                f"retry_count={retry_count} timeout_sec={timeout_sec}"
+            )
+            mk_loader.add_stream_proxy(
+                vhost, app, stream, url,
+                make_cb(proxy_id, vhost, app, stream, url),
+                retry_count=retry_count,
+                force=True,
+                timeout_sec=timeout_sec,
+                opt=opt,
+            )
+            count += 1
+
+        mk_logger.log_info(f"[pull_proxy_restore] 共恢复 {count} 个拉流代理")
+        return False  # 非独占，始终返回 False 让其他 on_start 插件继续执行

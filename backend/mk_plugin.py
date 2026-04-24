@@ -125,8 +125,8 @@ def on_start():
     mk_loader.update_config()
     mk_loader.set_fastapi(check_route, submit_coro)
 
-    # 自动恢复非按需拉流代理
-    _restore_pull_proxies()
+    # 派发 on_start 事件给插件（含 pull_proxy_restore 等）
+    py_plugin.registry.dispatch("on_start")
 
 
 def _restore_pull_proxies():

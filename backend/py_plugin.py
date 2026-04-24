@@ -10,6 +10,7 @@ import mk_logger
 
 # ── 所有 ZLM 支持的事件类型 ──────────────────────────────────────────
 SUPPORTED_EVENTS = [
+    "on_start",
     "on_publish",
     "on_play",
     "on_stream_not_found",

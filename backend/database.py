@@ -130,19 +130,25 @@ class Database:
         ''')
 
         self.connection.commit()
-        self._init_default_plugin_bindings()
+
+        # 仅在 plugin_bindings 表为空时（首次建库）插入默认绑定
+        self.cursor.execute("SELECT COUNT(*) FROM plugin_bindings")
+        if self.cursor.fetchone()[0] == 0:
+            self._init_default_plugin_bindings()
+
         mk_logger.log_info(f"Database initialized at {self.db_path}")
 
     def _init_default_plugin_bindings(self):
-        """插入内置插件的默认绑定记录（首次建库时写入，已存在则跳过）"""
+        """插入内置插件的默认绑定记录（仅首次建库、表为空时调用）"""
         defaults = [
-            ("on_stream_not_found", "pull_proxy_on_demand",  "{}", 0, 1),
-            ("on_player_proxy_failed", "pull_proxy_failover", "{}", 0, 1),
+            ("on_stream_not_found",    "pull_proxy_on_demand",  "{}", 0, 1),
+            ("on_player_proxy_failed", "pull_proxy_failover",   "{}", 0, 1),
+            ("on_start",               "pull_proxy_restore",    "{}", 0, 1),
         ]
         for event_type, plugin_name, params, priority, enabled in defaults:
             self.cursor.execute(
                 """
-                INSERT OR IGNORE INTO plugin_bindings
+                INSERT INTO plugin_bindings
                     (event_type, plugin_name, params, priority, enabled)
                 VALUES (?, ?, ?, ?, ?)
                 """,
