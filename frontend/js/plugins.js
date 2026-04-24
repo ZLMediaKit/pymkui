@@ -222,6 +222,7 @@ function renderDragList(containerId, plugins, showParamsBtn) {
             draggable="true"
             data-plugin-name="${escHtml(p.name)}"
             data-plugin-type="${escHtml(p.type)}"
+            data-plugin-exclusive="${p.exclusive ? 'true' : 'false'}"
             ondragstart="dragStart(event)"
             ondragend="dragEnd(event)"
             ondblclick="togglePluginBinding(this)">
@@ -244,28 +245,67 @@ function togglePluginBinding(el) {
     srcContainer.removeChild(el);
     _refreshEmptyHint(srcContainer);
 
-    const placeholder = target.querySelector('.pointer-events-none');
-    if (placeholder) placeholder.remove();
-
     if (targetId === 'selectedPlugins') {
-        // 移入已绑定：追加参数按钮
-        if (!el.querySelector('button')) {
-            const pName = el.dataset.pluginName;
-            const btn   = document.createElement('button');
-            btn.type      = 'button';
-            btn.className = 'ml-auto shrink-0 text-yellow-400/70 hover:text-yellow-400 transition-colors text-xs';
-            btn.title     = '编辑绑定参数';
-            btn.innerHTML = '<i class="fa fa-cog mr-1"></i>参数';
-            btn.setAttribute('onclick', `openParamsModal('${pName}')`);
-            el.appendChild(btn);
-        }
+        _addToSelected(el, target);
     } else {
         // 移回未绑定：移除参数按钮
         const btn = el.querySelector('button');
         if (btn) btn.remove();
+        const placeholder = target.querySelector('.pointer-events-none');
+        if (placeholder) placeholder.remove();
+        target.appendChild(el);
+    }
+}
+
+// ── 将插件元素加入"已绑定"列表（含独占清场逻辑）─────────────────────
+function _addToSelected(el, selectedContainer) {
+    const isExclusive = el.dataset.pluginExclusive === 'true';
+    const available   = document.getElementById('availablePlugins');
+
+    if (isExclusive) {
+        // 独占插件：将已绑定列表中其余插件全部移回未绑定
+        const existing = Array.from(selectedContainer.querySelectorAll('[data-plugin-name]'));
+        existing.forEach(item => {
+            selectedContainer.removeChild(item);
+            const btn = item.querySelector('button[data-params-btn]');
+            if (btn) btn.remove();
+            const ph = available.querySelector('.pointer-events-none');
+            if (ph) ph.remove();
+            available.appendChild(item);
+        });
+    } else {
+        // 非独占插件：若已绑定列表中存在独占插件，将其移回未绑定
+        const exclusiveEl = selectedContainer.querySelector('[data-plugin-exclusive="true"]');
+        if (exclusiveEl) {
+            selectedContainer.removeChild(exclusiveEl);
+            const btn = exclusiveEl.querySelector('button[data-params-btn]');
+            if (btn) btn.remove();
+            const ph = available.querySelector('.pointer-events-none');
+            if (ph) ph.remove();
+            available.appendChild(exclusiveEl);
+            _refreshEmptyHint(selectedContainer);
+        }
     }
 
-    target.appendChild(el);
+    // 清除占位提示
+    const placeholder = selectedContainer.querySelector('.pointer-events-none');
+    if (placeholder) placeholder.remove();
+
+    // 追加"参数"按钮
+    if (!el.querySelector('button[data-params-btn]')) {
+        const pName = el.dataset.pluginName;
+        const btn   = document.createElement('button');
+        btn.type      = 'button';
+        btn.dataset.paramsBtn = '1';
+        btn.className = 'ml-auto shrink-0 text-yellow-400/70 hover:text-yellow-400 transition-colors text-xs';
+        btn.title     = '编辑绑定参数';
+        btn.innerHTML = '<i class="fa fa-cog mr-1"></i>参数';
+        btn.setAttribute('onclick', `openParamsModal('${pName}')`);
+        el.appendChild(btn);
+    }
+
+    selectedContainer.appendChild(el);
+    _refreshEmptyHint(available);
 }
 
 // ── 拖拽排序 ──────────────────────────────────────────────────────────
@@ -298,29 +338,18 @@ function dropPlugin(e, targetArea) {
             srcContainer.removeChild(_dragSource);
             _refreshEmptyHint(srcContainer);
         }
-        const placeholder = targetContainer.querySelector('.pointer-events-none');
-        if (placeholder) placeholder.remove();
 
-        // 移入 selectedPlugins 时追加"参数"按钮
+        // 移入 selectedPlugins 时走统一的独占清场逻辑
         if (targetContainerId === 'selectedPlugins') {
-            const existingBtn = _dragSource.querySelector('button');
-            if (!existingBtn) {
-                const pName = _dragSource.dataset.pluginName;
-                const btn   = document.createElement('button');
-                btn.type      = 'button';
-                btn.className = 'ml-auto shrink-0 text-yellow-400/70 hover:text-yellow-400 transition-colors text-xs';
-                btn.title     = '编辑绑定参数';
-                btn.innerHTML = '<i class="fa fa-cog mr-1"></i>参数';
-                btn.setAttribute('onclick', `openParamsModal('${pName}')`);
-                _dragSource.appendChild(btn);
-            }
+            _addToSelected(_dragSource, targetContainer);
         } else {
             // 移回 availablePlugins 时移除参数按钮
-            const btn = _dragSource.querySelector('button');
+            const btn = _dragSource.querySelector('button[data-params-btn]');
             if (btn) btn.remove();
+            const placeholder = targetContainer.querySelector('.pointer-events-none');
+            if (placeholder) placeholder.remove();
+            targetContainer.appendChild(_dragSource);
         }
-
-        targetContainer.appendChild(_dragSource);
     }
 }
 function _refreshEmptyHint(container) {
