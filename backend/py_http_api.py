@@ -838,6 +838,83 @@ async def update_stream_proxy(request: Request):
             urls_list = [u for u in (urls_raw or []) if isinstance(u, dict) and u.get("url")]
             db.set_proxy_urls(proxy_id, urls_list)
 
+        # 读取更新后的最新记录，判断是否需要同步 ZLM
+        updated = db.get_pull_proxy(proxy_id)
+        final_on_demand = int(updated.get("on_demand", 1)) if updated else 1
+
+        if final_on_demand == 0 and updated:
+            # on_demand=0：需要先删除 ZLM 侧旧代理，再重新添加，确保配置生效
+            vhost  = updated.get("vhost") or "__defaultVhost__"
+            app    = updated.get("app") or ""
+            stream = updated.get("stream") or ""
+            key    = f"{vhost}/{app}/{stream}"
+
+            # 1. 调用 ZLM delStreamProxy（失败仅记录日志）
+            try:
+                zlm_del_url = f"{get_zlm_base_url()}/index/api/delStreamProxy"
+                del_resp = await client.post(
+                    zlm_del_url,
+                    data={"key": key},
+                    headers=get_forward_headers(request),
+                )
+                del_result = del_resp.json()
+                if del_result.get("code") != 0:
+                    mk_logger.log_warn(
+                        f"update_stream_proxy | ZLM delStreamProxy 非0: {del_result.get('msg')}, key={key}"
+                    )
+            except Exception as e:
+                mk_logger.log_warn(f"update_stream_proxy | ZLM delStreamProxy 失败（忽略）: {e}, key={key}")
+
+            # 2. 取地址列表，调用 ZLM addStreamProxy
+            proxy_urls = db.get_proxy_urls(proxy_id)
+            if proxy_urls:
+                first_item = proxy_urls[0]
+                url = first_item.get("url", "")
+                first_url_params = first_item.get("params", {})
+                if isinstance(first_url_params, str):
+                    try:
+                        first_url_params = json.loads(first_url_params)
+                    except Exception:
+                        first_url_params = {}
+                if not isinstance(first_url_params, dict):
+                    first_url_params = {}
+
+                zlm_add_params = {
+                    "vhost": vhost,
+                    "app": app,
+                    "stream": stream,
+                    "url": url,
+                    "force": 1,
+                }
+                zlm_add_params.update({k: v for k, v in first_url_params.items() if v != "" and v is not None})
+
+                # 透传 custom_params / protocol_params
+                for field in ("custom_params", "protocol_params"):
+                    raw = updated.get(field) or "{}"
+                    try:
+                        d = json.loads(raw) if isinstance(raw, str) else raw
+                        if isinstance(d, dict):
+                            zlm_add_params.update(d)
+                    except Exception:
+                        pass
+
+                try:
+                    zlm_add_url = f"{get_zlm_base_url()}/index/api/addStreamProxy"
+                    add_resp = await client.post(
+                        zlm_add_url,
+                        data=zlm_add_params,
+                        headers=get_forward_headers(request),
+                    )
+                    add_result = add_resp.json()
+                    if add_result.get("code") != 0:
+                        mk_logger.log_warn(
+                            f"update_stream_proxy | ZLM addStreamProxy 失败: {add_result.get('msg')}, key={key}"
+                        )
+                    else:
+                        mk_logger.log_info(f"update_stream_proxy | ZLM addStreamProxy 成功, key={key}")
+                except Exception as e:
+                    mk_logger.log_warn(f"update_stream_proxy | ZLM addStreamProxy 异常: {e}, key={key}")
+
         return {"code": 0, "msg": "修改成功"}
     except Exception as e:
         mk_logger.log_warn(f"更新拉流代理失败: {e}")
