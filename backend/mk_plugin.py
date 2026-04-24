@@ -129,64 +129,6 @@ def on_start():
     py_plugin.registry.dispatch("on_start")
 
 
-def _restore_pull_proxies():
-    """启动时从数据库读取所有 on_demand=0 的拉流代理，调用 mk_loader.add_stream_proxy 恢复"""
-    try:
-        proxies = db.get_all_pull_proxies()
-    except Exception as e:
-        mk_logger.log_warn(f"[restore_pull_proxies] 读取数据库失败: {e}")
-        return
-
-    count = 0
-    for proxy in proxies:
-        if proxy.get("on_demand", 0):
-            # 按需拉流，跳过
-            continue
-
-        vhost = proxy.get("vhost") or "__defaultVhost__"
-        app   = proxy.get("app", "")
-        stream = proxy.get("stream", "")
-        proxy_id = proxy.get("id")
-
-        # 从多地址表取第一条地址
-        proxy_urls = db.get_proxy_urls(proxy_id)
-        first_url  = proxy_urls[0] if proxy_urls else {}
-        url        = first_url.get("url", "")
-        url_params = first_url.get("params", {})  # 已反序列化为 dict
-
-        if not app or not stream or not url:
-            mk_logger.log_warn(f"[restore_pull_proxies] 跳过无效记录 id={proxy_id}")
-            continue
-
-        vhost, app, stream, url, retry_count, timeout_sec, opt = _build_proxy_call_args(proxy, url, url_params)
-
-        def make_callback(pid, vhost, app, stream, url):
-            def cb(err, key):
-                if err:
-                    mk_logger.log_warn(f"[restore_pull_proxies] 恢复失败 id={pid} {vhost}/{app}/{stream}: {err}")
-                else:
-                    mk_logger.log_info(f"[restore_pull_proxies] 恢复成功 id={pid} {vhost}/{app}/{stream} url={url}")
-            return cb
-
-        mk_logger.log_info(
-            f"[restore_pull_proxies] 恢复拉流代理 id={proxy_id} {vhost}/{app}/{stream} url={url} "
-            f"retry_count={retry_count} timeout_sec={timeout_sec}"
-        )
-        mk_loader.add_stream_proxy(
-            vhost,
-            app,
-            stream,
-            url,
-            make_callback(proxy_id, vhost, app, stream, url),
-            retry_count=retry_count,
-            force=True,
-            timeout_sec=timeout_sec,
-            opt=opt,
-        )
-        count += 1
-
-    mk_logger.log_info(f"[restore_pull_proxies] 共恢复 {count} 个拉流代理")
-
 
 def _build_proxy_call_args(proxy: dict, url: str = "", url_params: dict = {}) -> tuple:
     """
