@@ -7,6 +7,7 @@ import traceback
 import httpx
 import mk_loader
 import mk_logger
+import mk_plugin as _mk_plugin
 import urllib.parse
 from datetime import datetime
 from typing import Optional
@@ -568,42 +569,34 @@ async def add_stream_proxy(request: Request):
             else:
                 return {"code": -1, "msg": "写入数据库失败，vhost/app/stream 组合可能已存在"}
 
-        # 普通/强制模式：调用 ZLMediaKit 的 addStreamProxy 接口
-        # schema、rtp_type 等地址级参数从第一条地址的 params 取
-        zlm_url = f"{get_zlm_base_url()}/index/api/addStreamProxy"
-        zlm_params = {
-            "vhost": vhost,
-            "app": app,
-            "stream": stream,
-            "url": url,
-            "force": force,
+        # 普通/强制模式：通过 mk_loader.add_stream_proxy 调用 ZLMediaKit
+        # 构造传给 mk_loader 的 opt 参数（地址级 + custom + protocol）
+        proxy_record_tmp = {
+            "vhost": vhost, "app": app, "stream": stream,
+            "custom_params": custom_params,
+            "protocol_params": protocol_params,
         }
-        # 将第一条地址的 params 透传给 ZLM（schema、rtp_type 等）
-        zlm_params.update({k: v for k, v in first_url_params.items() if v != '' and v is not None})
+        _, _, _, _, retry_count_tmp, timeout_sec_tmp, opt_tmp = _mk_plugin._build_proxy_call_args(
+            proxy_record_tmp, url, first_url_params
+        )
 
-        # 添加自定义参数（不含 schema/rtp_type，已在地址级 params 中）
-        if custom_params:
-            try:
-                custom_params_dict = json.loads(custom_params) if isinstance(custom_params, str) else custom_params
-                if isinstance(custom_params_dict, dict):
-                    zlm_params.update(custom_params_dict)
-            except Exception:
-                pass
+        add_result_holder = {}
 
-        # 添加转协议参数
-        if protocol_params:
-            try:
-                protocol_params_dict = json.loads(protocol_params) if isinstance(protocol_params, str) else protocol_params
-                if isinstance(protocol_params_dict, dict):
-                    zlm_params.update(protocol_params_dict)
-            except Exception:
-                pass
+        def _add_cb(err, key):
+            add_result_holder["err"] = err
+            add_result_holder["key"] = key
 
-        # 透传客户端 cookie
-        response = await client.post(zlm_url, data=zlm_params, headers=get_forward_headers(request))
-        result = response.json()
+        mk_loader.add_stream_proxy(
+            vhost, app, stream, url,
+            _add_cb,
+            retry_count=retry_count_tmp,
+            force=bool(force),
+            timeout_sec=timeout_sec_tmp,
+            opt=opt_tmp,
+        )
 
-        if result.get("code") == 0:
+        add_err = add_result_holder.get("err")
+        if not add_err or force:
             pid = db.add_pull_proxy({
                 "vhost": vhost,
                 "app": app,
@@ -615,23 +608,11 @@ async def add_stream_proxy(request: Request):
             })
             if pid:
                 db.set_proxy_urls(pid, urls_list)
-            return {"code": 0, "msg": "添加成功", "data": result.get("data")}
-        elif force:
-            pid = db.add_pull_proxy({
-                "vhost": vhost,
-                "app": app,
-                "stream": stream,
-                "remark": remark,
-                "custom_params": custom_params,
-                "protocol_params": protocol_params,
-                "on_demand": 0,
-            })
-            if pid:
-                db.set_proxy_urls(pid, urls_list)
-            zlm_msg = result.get("msg", "ZLM返回失败")
-            return {"code": 0, "msg": f"强制添加成功（ZLM: {zlm_msg}）", "data": result.get("data")}
+            if add_err:
+                return {"code": 0, "msg": f"强制添加成功（ZLM: {add_err}）"}
+            return {"code": 0, "msg": "添加成功"}
         else:
-            return {"code": -1, "msg": result.get("msg", "添加失败")}
+            return {"code": -1, "msg": f"添加失败: {add_err}"}
     except Exception as e:
         mk_logger.log_warn(f"添加拉流代理失败: {e}")
         return {"code": -1, "msg": f"添加失败: {str(e)}"}
@@ -865,7 +846,7 @@ async def update_stream_proxy(request: Request):
             except Exception as e:
                 mk_logger.log_warn(f"update_stream_proxy | ZLM delStreamProxy 失败（忽略）: {e}, key={key}")
 
-            # 2. 取地址列表，调用 ZLM addStreamProxy
+            # 2. 取地址列表，调用 mk_loader.add_stream_proxy
             proxy_urls = db.get_proxy_urls(proxy_id)
             if proxy_urls:
                 first_item = proxy_urls[0]
@@ -879,41 +860,27 @@ async def update_stream_proxy(request: Request):
                 if not isinstance(first_url_params, dict):
                     first_url_params = {}
 
-                zlm_add_params = {
-                    "vhost": vhost,
-                    "app": app,
-                    "stream": stream,
-                    "url": url,
-                    "force": 1,
-                }
-                zlm_add_params.update({k: v for k, v in first_url_params.items() if v != "" and v is not None})
-
-                # 透传 custom_params / protocol_params
-                for field in ("custom_params", "protocol_params"):
-                    raw = updated.get(field) or "{}"
-                    try:
-                        d = json.loads(raw) if isinstance(raw, str) else raw
-                        if isinstance(d, dict):
-                            zlm_add_params.update(d)
-                    except Exception:
-                        pass
-
-                try:
-                    zlm_add_url = f"{get_zlm_base_url()}/index/api/addStreamProxy"
-                    add_resp = await client.post(
-                        zlm_add_url,
-                        data=zlm_add_params,
-                        headers=get_forward_headers(request),
+                if url:
+                    _, _, _, _, rc_tmp, ts_tmp, opt_tmp = _mk_plugin._build_proxy_call_args(
+                        updated, url, first_url_params
                     )
-                    add_result = add_resp.json()
-                    if add_result.get("code") != 0:
-                        mk_logger.log_warn(
-                            f"update_stream_proxy | ZLM addStreamProxy 失败: {add_result.get('msg')}, key={key}"
-                        )
-                    else:
-                        mk_logger.log_info(f"update_stream_proxy | ZLM addStreamProxy 成功, key={key}")
-                except Exception as e:
-                    mk_logger.log_warn(f"update_stream_proxy | ZLM addStreamProxy 异常: {e}, key={key}")
+
+                    def _update_cb(err, k):
+                        if err:
+                            mk_logger.log_warn(
+                                f"update_stream_proxy | mk_loader.add_stream_proxy 失败: {err}, key={k}"
+                            )
+                        else:
+                            mk_logger.log_info(f"update_stream_proxy | mk_loader.add_stream_proxy 成功, key={k}")
+
+                    mk_loader.add_stream_proxy(
+                        vhost, app, stream, url,
+                        _update_cb,
+                        retry_count=rc_tmp,
+                        force=True,
+                        timeout_sec=ts_tmp,
+                        opt=opt_tmp,
+                    )
 
         return {"code": 0, "msg": "修改成功"}
     except Exception as e:
@@ -980,36 +947,28 @@ async def toggle_stream_proxy_mode(request: Request):
         url_params      = first_url_item.get("params") or {}  # 已由 get_proxy_urls 反序列化为 dict
 
         if current_on_demand == 1:
-            # 按需 → 立即：调用 ZLM addStreamProxy（force=1）
-            zlm_url = f"{get_zlm_base_url()}/index/api/addStreamProxy"
-            zlm_params = {"vhost": vhost, "app": app, "stream": stream, "url": url, "force": 1}
-            # 将地址级参数（schema、rtp_type 等）透传给 ZLM
-            zlm_params.update({k: v for k, v in url_params.items() if v != '' and v is not None})
-            # 追加保存的自定义/协议参数
-            try:
-                cp = json.loads(proxy.get("custom_params") or "{}")
-                if isinstance(cp, dict):
-                    zlm_params.update(cp)
-            except Exception:
-                pass
-            try:
-                pp = json.loads(proxy.get("protocol_params") or "{}")
-                if isinstance(pp, dict):
-                    zlm_params.update(pp)
-            except Exception:
-                pass
-            try:
-                response = await client.post(zlm_url, data=zlm_params, headers=get_forward_headers(request))
-            except (httpx.ConnectError, httpx.ConnectTimeout) as e:
-                zlm_base = get_zlm_base_url()
-                mk_logger.log_warn(f"toggle_stream_proxy_mode | 无法连接 ZLMediaKit ({zlm_base}): {e}")
-                return {"code": -1, "msg": f"无法连接 ZLMediaKit（{zlm_base}），请确认 ZLM 已启动并端口可访问"}
-            except httpx.TimeoutException as e:
-                mk_logger.log_warn(f"toggle_stream_proxy_mode | 连接 ZLMediaKit 超时: {e}")
-                return {"code": -1, "msg": "连接 ZLMediaKit 超时，请检查网络或 ZLM 负载"}
-            result = response.json()
-            if result.get("code") != 0:
-                return {"code": -1, "msg": f"ZLM 添加失败: {result.get('msg', '未知错误')}"}
+            # 按需 → 立即：通过 mk_loader.add_stream_proxy（force=True）
+            if not url:
+                return {"code": -1, "msg": "代理无有效拉流地址"}
+
+            _, _, _, _, rc_tmp, ts_tmp, opt_tmp = _mk_plugin._build_proxy_call_args(proxy, url, url_params)
+
+            toggle_result = {"err": None}
+
+            def _toggle_add_cb(err, k):
+                toggle_result["err"] = err
+
+            mk_loader.add_stream_proxy(
+                vhost, app, stream, url,
+                _toggle_add_cb,
+                retry_count=rc_tmp,
+                force=True,
+                timeout_sec=ts_tmp,
+                opt=opt_tmp,
+            )
+
+            if toggle_result["err"]:
+                return {"code": -1, "msg": f"ZLM 添加失败: {toggle_result['err']}"}
             db.update_pull_proxy(proxy_id, on_demand=0)
             return {"code": 0, "msg": "已切换为立即模式", "data": {"on_demand": 0}}
         else:
