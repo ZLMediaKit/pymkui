@@ -1340,12 +1340,16 @@ async def delete_recording(request: Request):
 @app.get(
     "/index/pyapi/recordings/file",
     tags=["录像管理"],
-    summary="重定向到 ZLM downloadFile 接口播放录像",
+    summary="重定向到 ZLM downloadFile 接口播放或下载录像",
 )
-async def serve_recording_file(id: int = Query(..., description="录像记录 ID")):
+async def serve_recording_file(
+    id: int = Query(..., description="录像记录 ID"),
+    disposition: str = Query(default="inline", description="inline=播放, attachment=下载"),
+):
     """
-    查库获取录像 file_path，重定向到 ZLM 内置接口 /index/api/downloadFile?file_path=...
-    由 ZLM 负责 HTTP Range 流式传输，后端不加载文件内容到内存。
+    查库获取录像 file_path，重定向到 ZLM 内置接口 /index/api/downloadFile。
+    disposition=inline  → 浏览器内联播放
+    disposition=attachment → 触发下载，附带 save_name
     """
     try:
         row = db.get_recording_by_id(int(id))
@@ -1354,8 +1358,17 @@ async def serve_recording_file(id: int = Query(..., description="录像记录 ID
         file_path = row.get("file_path", "")
         if not file_path:
             raise HTTPException(status_code=404, detail="录像文件路径为空")
-        encoded = urllib.parse.quote(file_path, safe='')
-        redirect_url = f"/index/api/downloadFile?file_path={encoded}"
+        encoded_path = urllib.parse.quote(file_path, safe='')
+        if disposition == "attachment":
+            file_name = row.get("file_name") or os.path.basename(file_path)
+            encoded_name = urllib.parse.quote(file_name, safe='')
+            redirect_url = (
+                f"/index/api/downloadFile"
+                f"?file_path={encoded_path}"
+                f"&save_name={encoded_name}"
+            )
+        else:
+            redirect_url = f"/index/api/downloadFile?file_path={encoded_path}"
         return RedirectResponse(url=redirect_url, status_code=302)
     except HTTPException:
         raise

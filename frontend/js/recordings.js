@@ -113,6 +113,11 @@ function renderRecTable(list) {
                     class="text-primary/80 hover:text-primary text-xs transition mr-3" title="播放">
                     <i class="fa fa-play mr-1"></i>播放
                 </button>
+                <a href="/index/pyapi/recordings/file?id=${r.id}&disposition=attachment"
+                    download="${escHtmlRec(r.file_name || 'recording.mp4')}"
+                    class="text-green-400/70 hover:text-green-400 text-xs transition mr-3" title="下载">
+                    <i class="fa fa-download mr-1"></i>下载
+                </a>
                 <button onclick="deleteRecording(${r.id})"
                     class="text-red-400/70 hover:text-red-400 text-xs transition" title="删除记录">
                     <i class="fa fa-trash mr-1"></i>删除
@@ -229,7 +234,7 @@ function escRec(s) {
 
 // ── 播放录像 ──────────────────────────────────────────────────────────
 function playRecording(id) {
-    const url = `/index/pyapi/recordings/file?id=${id}`;
+    const url = `/index/pyapi/recordings/file?id=${id}&disposition=inline`;
     // 复用或新建模态框
     let modal = document.getElementById('recPlayerModal');
     if (!modal) {
