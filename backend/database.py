@@ -130,7 +130,26 @@ class Database:
         ''')
 
         self.connection.commit()
+        self._init_default_plugin_bindings()
         mk_logger.log_info(f"Database initialized at {self.db_path}")
+
+    def _init_default_plugin_bindings(self):
+        """插入内置插件的默认绑定记录（首次建库时写入，已存在则跳过）"""
+        defaults = [
+            ("on_stream_not_found", "pull_proxy_on_demand",  "{}", 0, 1),
+            ("on_player_proxy_failed", "pull_proxy_failover", "{}", 0, 1),
+        ]
+        for event_type, plugin_name, params, priority, enabled in defaults:
+            self.cursor.execute(
+                """
+                INSERT OR IGNORE INTO plugin_bindings
+                    (event_type, plugin_name, params, priority, enabled)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (event_type, plugin_name, params, priority, enabled),
+            )
+        self.connection.commit()
+        mk_logger.log_info("[Database] 默认插件绑定已初始化")
     
     def close(self):
         """Close database connection"""

@@ -230,58 +230,7 @@ def _build_proxy_call_args(proxy: dict, url: str = "", url_params: dict = {}) ->
 
 def on_stream_not_found(args: dict, sender: dict, invoker) -> bool:
     mk_logger.log_info(f"on_stream_not_found, args: {args}, sender: {sender}")
-
-    vhost  = args.get("vhost")  or "__defaultVhost__"
-    app    = args.get("app",    "")
-    stream = args.get("stream", "")
-
-    # 查询数据库，看是否有匹配的按需拉流代理
-    try:
-        db.cursor.execute(
-            "SELECT * FROM pull_proxies WHERE vhost=? AND app=? AND stream=? AND on_demand=1",
-            (vhost, app, stream)
-        )
-        row = db.cursor.fetchone()
-        proxy = dict(row) if row else None
-    except Exception as e:
-        mk_logger.log_warn(f"[on_stream_not_found] 查询数据库失败: {e}")
-        proxy = None
-
-    if proxy:
-        # 找到按需拉流代理，启动拉流，让播放器等待流上线
-        pid = proxy.get("id")
-        # 从多地址表取第一条地址
-        proxy_urls = db.get_proxy_urls(pid)
-        first_url  = proxy_urls[0] if proxy_urls else {}
-        url        = first_url.get("url", "")
-        url_params = first_url.get("params", {})  # 已反序列化为 dict
-        if not url:
-            mk_logger.log_warn(f"[on_stream_not_found] 按需代理无有效地址 id={pid}")
-            return False
-        vhost, app, stream, url, retry_count, timeout_sec, opt = _build_proxy_call_args(proxy, url, url_params)
-        mk_logger.log_info(
-            f"[on_stream_not_found] 触发按需拉流 id={pid} {vhost}/{app}/{stream} url={url}"
-        )
-
-        def cb(err, key):
-            if err:
-                mk_logger.log_warn(f"[on_stream_not_found] 按需拉流失败 id={pid} {vhost}/{app}/{stream}: {err}")
-            else:
-                mk_logger.log_info(f"[on_stream_not_found] 按需拉流成功 id={pid} {vhost}/{app}/{stream}")
-
-        opt['auto_close'] = True  # 按需拉流自动关闭，流无人观看且拉流成功后自动关闭
-        mk_loader.add_stream_proxy(
-            vhost, app, stream, url, cb,
-            retry_count=len(proxy_urls) - 1,  # 首次拉取第一条地址，失败后自动重试剩余地址
-            force=True,          # 已存在则不重复拉
-            timeout_sec=timeout_sec,
-            opt=opt,
-        )
-        # 此事件被python拦截，ZLM等待拉流成功后自动推送流给播放器
-        return True
-
-    # 按需拉流代理不存在，不处理事件
-    return False
+    return py_plugin.registry.dispatch("on_stream_not_found", args=args, sender=sender, invoker=invoker)
 
 
 def on_http_access(parser: mk_loader.Parser, path: str, file_path: str, is_dir: bool, invoker, sender: dict) -> bool:
@@ -300,68 +249,9 @@ def on_http_access(parser: mk_loader.Parser, path: str, file_path: str, is_dir: 
 
 def on_player_proxy_failed(url: str, media_tuple: mk_loader.MediaTuple, ex: mk_loader.SockException) -> bool:
     mk_logger.log_info(f"on_player_proxy_failed: {url}, {media_tuple.shortUrl()}, {ex.what()}")
-
-    # 尝试多地址切换：根据当前失败的 url 查找对应代理，切换到下一个备用地址
-    try:
-        vhost  = media_tuple.vhost  if hasattr(media_tuple, 'vhost')  else '__defaultVhost__'
-        app    = media_tuple.app    if hasattr(media_tuple, 'app')    else ''
-        stream = media_tuple.stream if hasattr(media_tuple, 'stream') else ''
-
-        if not app or not stream:
-            return False
-
-        # 查询数据库
-        db.cursor.execute(
-            "SELECT * FROM pull_proxies WHERE vhost=? AND app=? AND stream=?",
-            (vhost, app, stream)
-        )
-        row = db.cursor.fetchone()
-        if not row:
-            return False
-        proxy = dict(row)
-        pid = proxy.get("id")
-        if not pid:
-            return False
-
-        proxy_urls = db.get_proxy_urls(int(pid))
-        if len(proxy_urls) <= 1:
-            # 只有一个地址，无法切换
-            return False
-
-        # 找到当前失败的地址索引
-        current_idx = None
-        for i, pu in enumerate(proxy_urls):
-            if pu.get("url", "") == url:
-                current_idx = i
-                break
-
-        if current_idx is None:
-            current_idx = 0
-
-        # 切换到下一个地址（循环）
-        next_idx = (current_idx + 1) % len(proxy_urls)
-        if next_idx == current_idx:
-            return False  # 只有一条有效地址
-
-        next_url_item = proxy_urls[next_idx]
-        next_url      = next_url_item.get("url", "")
-        next_params   = next_url_item.get("params", {})
-
-        if not next_url:
-            return False
-
-        mk_logger.log_info(
-            f"[on_player_proxy_failed] 切换备用地址 id={pid} {vhost}/{app}/{stream} "
-            f"[{current_idx}→{next_idx}] {url} → {next_url}"
-        )
-
-        mk_loader.update_stream_proxy(vhost, app, stream, next_url, next_params)
-        # 返回 True：Python 已接管处理，ZLM 不再默认处理
-        return True
-    except Exception as e:
-        mk_logger.log_warn(f"[on_player_proxy_failed] 多地址切换异常: {e}")
-
-    return False
+    return py_plugin.registry.dispatch(
+        "on_player_proxy_failed", url=url, media_tuple=media_tuple, ex=ex
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════
