@@ -38,15 +38,46 @@
         <div class="flex-1 min-w-0 space-y-4">
             <!-- 筛选栏 -->
             <div class="bg-white/5 rounded-xl border border-white/10 p-4 flex flex-wrap gap-3 items-end">
-                <div>
+                <div class="relative">
                     <label class="text-white/60 text-xs block mb-1">日期</label>
-                    <input id="recDatePicker" type="date"
-                        class="bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                        oninput="loadRecordingList()">
+                    <button id="recDateBtn" onclick="toggleRecCalendar()"
+                        class="bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary flex items-center gap-2 min-w-[130px]">
+                        <i class="fa fa-calendar text-white/50"></i>
+                        <span id="recDateBtnText">选择日期</span>
+                    </button>
+                    <!-- 自定义日历弹窗 -->
+                    <div id="recCalendarPop" class="hidden absolute left-0 top-full mt-1 z-50 bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-3 w-64 select-none">
+                        <div class="flex items-center justify-between mb-2">
+                            <button onclick="recCalNav(-1)" class="text-white/50 hover:text-white px-2 py-1 rounded transition">&#8249;</button>
+                            <span id="recCalMonthLabel" class="text-white text-sm font-semibold"></span>
+                            <button onclick="recCalNav(1)"  class="text-white/50 hover:text-white px-2 py-1 rounded transition">&#8250;</button>
+                        </div>
+                        <div class="grid grid-cols-7 gap-0.5 text-center text-white/40 text-xs mb-1">
+                            <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+                        </div>
+                        <div id="recCalGrid" class="grid grid-cols-7 gap-0.5 text-center text-sm"></div>
+                        <div class="mt-2 flex justify-end">
+                            <button onclick="clearRecDate()" class="text-white/40 hover:text-white text-xs px-2 py-1 rounded transition">清除日期</button>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <label class="text-white/60 text-xs block mb-1">起始时间</label>
+                    <input id="recStartTime" type="time" step="1"
+                        class="bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                </div>
+                <div>
+                    <label class="text-white/60 text-xs block mb-1">结束时间</label>
+                    <input id="recEndTime" type="time" step="1"
+                        class="bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary">
                 </div>
                 <button onclick="loadRecordingList()"
                     class="bg-gradient-primary text-white px-5 py-2 rounded-lg font-semibold hover:shadow-neon transition self-end">
                     <i class="fa fa-search mr-1"></i>查询
+                </button>
+                <button onclick="clearRecTimeRange()"
+                    class="bg-white/10 hover:bg-white/20 text-white/70 px-4 py-2 rounded-lg text-sm transition self-end" title="清除时间范围">
+                    <i class="fa fa-times mr-1"></i>清除时间
                 </button>
                 <span id="recStatText" class="text-white/40 text-xs self-end"></span>
             </div>
@@ -57,7 +88,7 @@
                     <span>时间轴（当日录像分布）</span>
                     <span id="timelineDate" class="text-white/30 font-normal"></span>
                 </div>
-                <div id="recTimeline" class="relative w-full" style="height:48px;">
+                <div id="recTimeline" class="relative w-full cursor-pointer" style="height:48px;">
                     <div class="absolute inset-0 bg-white/5 rounded-lg overflow-hidden" id="timelineTrack">
                         <!-- 时间段色块由 JS 渲染 -->
                     </div>

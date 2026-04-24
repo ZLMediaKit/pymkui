@@ -6,15 +6,33 @@
 let _recSelectedStream = null;   // { vhost, app, stream }
 let _recAllStreams      = [];
 let _recCurrentList    = [];     // 当前页录像数组
+let _recSelectedDate   = '';     // 当前选中日期 YYYY-MM-DD
 
 // ── 页面入口 ──────────────────────────────────────────────────────────
 async function loadRecordingsPage() {
     // 默认选今天
     const today = new Date().toISOString().slice(0, 10);
-    const picker = document.getElementById('recDatePicker');
-    if (picker && !picker.value) picker.value = today;
-
+    if (!_recSelectedDate) {
+        _recSelectedDate = today;
+        _fillDayTimeRange(today);
+        _updateRecDateBtn(today);
+    }
     await loadRecStreamList();
+}
+
+function _fillDayTimeRange(date) {
+    const startEl = document.getElementById('recStartTime');
+    const endEl   = document.getElementById('recEndTime');
+    if (startEl) startEl.value = '00:00:00';
+    if (endEl)   endEl.value   = '23:59:59';
+}
+
+function clearRecTimeRange() {
+    const startEl = document.getElementById('recStartTime');
+    const endEl   = document.getElementById('recEndTime');
+    if (startEl) startEl.value = '';
+    if (endEl)   endEl.value   = '';
+    loadRecordingList();
 }
 
 // ── 左侧流列表 ────────────────────────────────────────────────────────
@@ -75,15 +93,33 @@ function selectRecStream(vhost, app, stream) {
 async function loadRecordingList() {
     if (!_recSelectedStream) return;
     const { vhost, app, stream } = _recSelectedStream;
-    const date = document.getElementById('recDatePicker').value || '';
+    const date     = _recSelectedDate || '';
+    const startVal = document.getElementById('recStartTime')?.value || '';
+    const endVal   = document.getElementById('recEndTime')?.value   || '';
+    // time 类型只有 HH:MM:SS，需要拼上日期才能转时间戳；无日期则取今天
+    const baseDate = date || new Date().toISOString().slice(0, 10);
+    const startTs  = startVal ? Math.floor(new Date(`${baseDate}T${startVal}`).getTime() / 1000) : 0;
+    const endTs    = endVal   ? Math.floor(new Date(`${baseDate}T${endVal}`).getTime()   / 1000) : 0;
 
     try {
-        const params = new URLSearchParams({ vhost, app, stream, limit: 500 });
-        if (date) params.set('date', date);
-        const res = await apiGet('/index/pyapi/recordings?' + params.toString());
-        _recCurrentList = (res.code === 0 ? res.data : []) || [];
+        // ① 时间轴：只按日期查全天，不受起止时间影响
+        const timelineParams = new URLSearchParams({ vhost, app, stream, limit: 500 });
+        if (date) timelineParams.set('date', date);
+        const tlRes = await apiGet('/index/pyapi/recordings?' + timelineParams.toString());
+        const allDayList = (tlRes.code === 0 ? tlRes.data : []) || [];
+        renderTimeline(allDayList, date);
+
+        // ② 文件列表：在全天数据基础上叠加起止时间过滤（前端直接过滤，避免多一次请求）
+        _recCurrentList = (startTs || endTs)
+            ? allDayList.filter(r => {
+                const ts = r.start_time || 0;
+                if (startTs && ts < startTs) return false;
+                if (endTs   && ts > endTs)   return false;
+                return true;
+              })
+            : allDayList;
+
         renderRecTable(_recCurrentList);
-        renderTimeline(_recCurrentList, date);
         document.getElementById('recStatText').textContent =
             `共 ${_recCurrentList.length} 条`;
     } catch (e) {
@@ -182,6 +218,107 @@ function renderTimeline(list, date) {
 
         track.appendChild(bar);
     });
+
+    // ── 拖拽框选时间段 ────────────────────────────────────────────────
+    _initTimelineDrag(track, baseTs, tipEl);
+}
+
+// 拖拽框选：长按 200ms 后进入框选模式，松开后更新起止时间并重新查询
+function _initTimelineDrag(track, baseTs, tipEl) {
+    const DAY_SEC = 86400;
+    let dragState = null;   // { startX, selEl }
+    let holdTimer = null;
+
+    // 选区元素
+    let selEl = track.querySelector('.rec-sel-box');
+    if (!selEl) {
+        selEl = document.createElement('div');
+        selEl.className = 'rec-sel-box absolute top-0 bottom-4 bg-yellow-400/30 border border-yellow-400/70 pointer-events-none hidden rounded';
+        track.appendChild(selEl);
+    }
+
+    // 清除旧的监听（通过替换节点）
+    const newTrack = track.cloneNode(true);
+    track.parentNode.replaceChild(newTrack, track);
+    // 重新拿新节点
+    const t = newTrack;
+    const s = t.querySelector('.rec-sel-box');
+
+    const pct2ts = pct => baseTs + Math.round(pct / 100 * DAY_SEC);
+    const ts2Str = ts => {
+        const d = new Date(ts * 1000);
+        const pad = n => String(n).padStart(2, '0');
+        return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    };
+
+    t.addEventListener('mousedown', ev => {
+        if (ev.button !== 0) return;
+        const rect = t.getBoundingClientRect();
+        const x0 = ev.clientX - rect.left;
+        holdTimer = setTimeout(() => {
+            dragState = { startX: x0, rect };
+            s.style.left  = (x0 / rect.width * 100) + '%';
+            s.style.width = '0%';
+            s.classList.remove('hidden');
+            t.style.cursor = 'crosshair';        }, 200);
+    });
+
+    document.addEventListener('mousemove', ev => {
+        if (!dragState) return;
+        tipEl.classList.add('hidden');
+        const rect = dragState.rect;
+        const x  = Math.max(0, Math.min(ev.clientX - rect.left, rect.width));
+        const x0 = dragState.startX;
+        const w  = rect.width;
+        const left  = Math.min(x0, x);
+        const right = Math.max(x0, x);
+        s.style.left  = (left  / w * 100) + '%';
+        s.style.width = ((right - left) / w * 100) + '%';
+
+        // 实时显示时间提示
+        const tsL = pct2ts(left  / w * 100);
+        const tsR = pct2ts(right / w * 100);
+        const fmt = ts => new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour12: false });
+        const tipX = Math.min(right + 4, w - 100);
+        tipEl.style.left = tipX + 'px';
+        tipEl.textContent = `${fmt(tsL)} ~ ${fmt(tsR)}`;
+        tipEl.classList.remove('hidden');
+    });
+
+    document.addEventListener('mouseup', ev => {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+        if (!dragState) return;
+        tipEl.classList.add('hidden');
+        t.style.cursor = 'pointer';
+
+        const rect = dragState.rect;
+        const x0   = dragState.startX;
+        const x1   = Math.max(0, Math.min(ev.clientX - rect.left, rect.width));
+        dragState = null;
+        s.classList.add('hidden');
+
+        const pL = Math.min(x0, x1) / rect.width * 100;
+        const pR = Math.max(x0, x1) / rect.width * 100;
+        if (pR - pL < 0.5) return;  // 选区太小忽略
+
+        const tsStart = pct2ts(pL);
+        const tsEnd   = pct2ts(pR);
+
+        const startEl = document.getElementById('recStartTime');
+        const endEl   = document.getElementById('recEndTime');
+        if (startEl) startEl.value = ts2Str(tsStart);
+        if (endEl)   endEl.value   = ts2Str(tsEnd);
+
+        loadRecordingList();
+    });
+
+    t.addEventListener('mouseleave', () => {
+        // 鼠标离开轨道时只取消长按计时，拖拽中不中断（由 document mouseup 处理）
+        clearTimeout(holdTimer);
+        holdTimer = null;
+        if (!dragState) tipEl.classList.add('hidden');
+    });
 }
 
 function scrollToRecordRow(id) {
@@ -230,6 +367,137 @@ function escHtmlRec(s) {
 }
 function escRec(s) {
     return String(s).replace(/'/g, "\\'");
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 自定义日历组件
+// ══════════════════════════════════════════════════════════════════════
+let _calYear  = 0;
+let _calMonth = 0;   // 1-12
+let _calDates = new Set();   // 当月有录像的日期 Set<'YYYY-MM-DD'>
+
+function _updateRecDateBtn(date) {
+    const btn = document.getElementById('recDateBtnText');
+    if (btn) btn.textContent = date || '选择日期';
+}
+
+function toggleRecCalendar() {
+    const pop = document.getElementById('recCalendarPop');
+    if (!pop) return;
+    const isHidden = pop.classList.contains('hidden');
+    if (isHidden) {
+        // 打开：以当前选中日期或今天为基准
+        const base = _recSelectedDate || new Date().toISOString().slice(0, 10);
+        const [y, m] = base.split('-').map(Number);
+        _calYear  = y;
+        _calMonth = m;
+        _renderCalendar();
+        pop.classList.remove('hidden');
+        // 点击外部关闭
+        setTimeout(() => {
+            document.addEventListener('click', _closeCalOutside, { once: true });
+        }, 0);
+    } else {
+        pop.classList.add('hidden');
+    }
+}
+
+function _closeCalOutside(ev) {
+    const pop = document.getElementById('recCalendarPop');
+    const btn = document.getElementById('recDateBtn');
+    if (pop && !pop.contains(ev.target) && btn && !btn.contains(ev.target)) {
+        pop.classList.add('hidden');
+    } else {
+        // 点在内部，继续监听
+        document.addEventListener('click', _closeCalOutside, { once: true });
+    }
+}
+
+function recCalNav(delta) {
+    _calMonth += delta;
+    if (_calMonth > 12) { _calMonth = 1;  _calYear++; }
+    if (_calMonth < 1)  { _calMonth = 12; _calYear--; }
+    _renderCalendar();
+}
+
+async function _renderCalendar() {
+    const label = document.getElementById('recCalMonthLabel');
+    const grid  = document.getElementById('recCalGrid');
+    if (!label || !grid) return;
+
+    label.textContent = `${_calYear} 年 ${_calMonth} 月`;
+    grid.innerHTML = '<div class="col-span-7 text-center text-white/30 text-xs py-2">加载中…</div>';
+
+    // 查询当月有录像的日期（带当前选中的流过滤）
+    try {
+        const params = new URLSearchParams({ year: _calYear, month: _calMonth });
+        if (_recSelectedStream) {
+            params.set('vhost',  _recSelectedStream.vhost);
+            params.set('app',    _recSelectedStream.app);
+            params.set('stream', _recSelectedStream.stream);
+        }
+        const res = await apiGet('/index/pyapi/recordings/dates?' + params.toString());
+        _calDates = new Set(res.code === 0 ? res.data : []);
+    } catch (e) {
+        _calDates = new Set();
+    }
+
+    _buildCalGrid();
+}
+
+function _buildCalGrid() {
+    const grid = document.getElementById('recCalGrid');
+    if (!grid) return;
+
+    const firstDay = new Date(_calYear, _calMonth - 1, 1).getDay(); // 0=日
+    const daysInMonth = new Date(_calYear, _calMonth, 0).getDate();
+    const today = new Date().toISOString().slice(0, 10);
+
+    let html = '';
+    // 空格补齐
+    for (let i = 0; i < firstDay; i++) {
+        html += '<div></div>';
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${_calYear}-${String(_calMonth).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const isSelected = dateStr === _recSelectedDate;
+        const isToday    = dateStr === today;
+        const hasRec     = _calDates.has(dateStr);
+
+        const base = 'relative flex flex-col items-center justify-center rounded-lg py-1 cursor-pointer transition ';
+        let cls = base;
+        if (isSelected) {
+            cls += 'bg-primary text-white font-bold';
+        } else if (isToday) {
+            cls += 'border border-primary/60 text-white hover:bg-white/10';
+        } else {
+            cls += 'text-white/70 hover:bg-white/10';
+        }
+
+        html += `<div class="${cls}" onclick="selectRecDate('${dateStr}')">
+            <span>${d}</span>
+            ${hasRec ? `<span class="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-red-400'}"></span>` : ''}
+        </div>`;
+    }
+    grid.innerHTML = html;
+}
+
+function selectRecDate(dateStr) {
+    _recSelectedDate = dateStr;
+    _updateRecDateBtn(dateStr);
+    _fillDayTimeRange(dateStr);
+    // 刷新日历格子高亮
+    _buildCalGrid();
+    // 关闭弹窗
+    document.getElementById('recCalendarPop')?.classList.add('hidden');
+    loadRecordingList();
+}
+
+function clearRecDate() {
+    _recSelectedDate = '';
+    _updateRecDateBtn('');
+    document.getElementById('recCalendarPop')?.classList.add('hidden');
+    loadRecordingList();
 }
 
 // ── 播放录像 ──────────────────────────────────────────────────────────

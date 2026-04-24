@@ -1306,15 +1306,40 @@ async def get_recordings(
     stream: str = Query(default="", description="流ID，空则不过滤"),
     vhost: str = Query(default="", description="虚拟主机，空则不过滤"),
     date: str = Query(default="", description="日期 YYYY-MM-DD，空则不过滤"),
+    start_ts: int = Query(default=0, description="起始时间戳（秒），0则不过滤"),
+    end_ts: int = Query(default=0, description="结束时间戳（秒），0则不过滤"),
     limit: int = Query(default=200, description="最多返回条数"),
     offset: int = Query(default=0, description="分页偏移"),
 ):
     try:
         rows = db.get_recordings(app=app, stream=stream, vhost=vhost,
-                                 date=date, limit=limit, offset=offset)
+                                 date=date, limit=limit, offset=offset,
+                                 start_ts=start_ts, end_ts=end_ts)
         return {"code": 0, "data": rows, "total": len(rows)}
     except Exception as e:
         mk_logger.log_warn(f"get_recordings error: {e}")
+        return {"code": -1, "msg": str(e)}
+
+
+@app.get(
+    "/index/pyapi/recordings/dates",
+    tags=["录像管理"],
+    summary="查询某月内有录像的日期列表",
+)
+async def get_recording_dates(
+    year:   int = Query(..., description="年份，如 2026"),
+    month:  int = Query(..., description="月份，1-12"),
+    app:    str = Query(default="", description="应用名，空则不过滤"),
+    stream: str = Query(default="", description="流ID，空则不过滤"),
+    vhost:  str = Query(default="", description="虚拟主机，空则不过滤"),
+):
+    """返回指定月份内有录像记录的日期列表，格式 ['YYYY-MM-DD', ...]"""
+    try:
+        dates = db.get_recording_dates(year=year, month=month,
+                                       app=app, stream=stream, vhost=vhost)
+        return {"code": 0, "data": dates}
+    except Exception as e:
+        mk_logger.log_warn(f"get_recording_dates error: {e}")
         return {"code": -1, "msg": str(e)}
 
 

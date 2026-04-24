@@ -286,8 +286,9 @@ class Database:
             return None
 
     def get_recordings(self, app: str = "", stream: str = "", vhost: str = "",
-                       date: str = "", limit: int = 500, offset: int = 0) -> List[Dict[str, Any]]:
-        """查询录像列表，支持按 app/stream/vhost/日期过滤"""
+                       date: str = "", limit: int = 500, offset: int = 0,
+                       start_ts: int = 0, end_ts: int = 0) -> List[Dict[str, Any]]:
+        """查询录像列表，支持按 app/stream/vhost/日期/时间戳范围过滤"""
         try:
             clauses, params = [], []
             if vhost:
@@ -299,6 +300,10 @@ class Database:
             if date:
                 # date 格式 YYYY-MM-DD，与 created_at 前10位匹配
                 clauses.append("substr(created_at, 1, 10) = ?"); params.append(date)
+            if start_ts:
+                clauses.append("start_time >= ?"); params.append(start_ts)
+            if end_ts:
+                clauses.append("start_time <= ?"); params.append(end_ts)
             where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
             params += [limit, offset]
             self.cursor.execute(
@@ -353,6 +358,29 @@ class Database:
         except Exception as e:
             mk_logger.log_warn(f"get_recording_by_id error: {e}")
             return None
+
+    def get_recording_dates(self, year: int, month: int,
+                            app: str = "", stream: str = "", vhost: str = "") -> list:
+        """返回指定年月内有录像的日期列表（YYYY-MM-DD 字符串列表）"""
+        try:
+            prefix = f"{year:04d}-{month:02d}-"
+            clauses = ["substr(created_at, 1, 7) = ?"]
+            params: list = [f"{year:04d}-{month:02d}"]
+            if vhost:
+                clauses.append("vhost = ?"); params.append(vhost)
+            if app:
+                clauses.append("app = ?"); params.append(app)
+            if stream:
+                clauses.append("stream = ?"); params.append(stream)
+            where = "WHERE " + " AND ".join(clauses)
+            self.cursor.execute(
+                f"SELECT DISTINCT substr(created_at, 1, 10) AS d FROM recordings {where} ORDER BY d",
+                params,
+            )
+            return [row["d"] for row in self.cursor.fetchall()]
+        except Exception as e:
+            mk_logger.log_warn(f"get_recording_dates error: {e}")
+            return []
     
     def add_protocol_option(self, name: str, **kwargs) -> Optional[int]:
         """Add a protocol option preset"""
