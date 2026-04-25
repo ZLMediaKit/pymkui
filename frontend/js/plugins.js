@@ -402,18 +402,23 @@ async function saveBinding() {
 
 // ── 清除绑定 ──────────────────────────────────────────────────────────
 async function clearBinding(eventType) {
-    if (!confirm(`确定清除 "${eventType}" 的所有插件绑定？`)) return;
-    try {
-        const res = await apiPost('/index/pyapi/plugin/bindings/delete', { event_type: eventType });
-        if (res.code === 0) {
-            showToast('已清除', 'success');
-            await loadEventBindings();
-        } else {
-            showToast(res.msg || '清除失败', 'error');
+    showConfirmModal(
+        '清除插件绑定',
+        `确定清除 <span class="text-primary font-mono">${eventType}</span> 的所有插件绑定？`,
+        async () => {
+            try {
+                const res = await apiPost('/index/pyapi/plugin/bindings/delete', { event_type: eventType });
+                if (res.code === 0) {
+                    showToast('已清除', 'success');
+                    await loadEventBindings();
+                } else {
+                    showToast(res.msg || '清除失败', 'error');
+                }
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
         }
-    } catch (e) {
-        showToast(e.message, 'error');
-    }
+    );
 }
 
 // ── 参数编辑弹窗 ───────────────────────────────────────────────────────
