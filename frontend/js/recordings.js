@@ -155,8 +155,8 @@ async function loadRecordingList() {
     const endTs    = endVal   ? Math.floor(new Date(`${baseDate}T${endVal}`).getTime()   / 1000) : 0;
 
     try {
-        // ① 时间轴：只按日期查全天，不受起止时间影响
-        const timelineParams = new URLSearchParams({ vhost, app, stream, limit: 500 });
+        // ① 时间轴：只按日期查全天，不受起止时间影响（不限条数）
+        const timelineParams = new URLSearchParams({ vhost, app, stream, limit: 10000 });
         if (date) timelineParams.set('date', date);
         const tlRes = await apiGet('/index/pyapi/recordings?' + timelineParams.toString());
         const allDayList = (tlRes.code === 0 ? tlRes.data : []) || [];
