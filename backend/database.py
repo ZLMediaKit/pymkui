@@ -731,7 +731,8 @@ class Database:
         params: Optional[dict] = None, priority: int = 0, enabled: int = 1
     ) -> bool:
         """
-        插入或更新单条绑定（event_type + plugin_name 唯一）。
+        插入单条绑定。
+        注意：移除了 UNIQUE 约束后不再做 ON CONFLICT UPSERT，直接 INSERT。
         params 为字典，存储该绑定的自定义参数。
         """
         try:
@@ -740,11 +741,6 @@ class Database:
                 '''
                 INSERT INTO plugin_bindings (event_type, plugin_name, params, priority, enabled, updated_at)
                 VALUES (?, ?, ?, ?, ?, current_timestamp)
-                ON CONFLICT(event_type, plugin_name) DO UPDATE SET
-                    params     = excluded.params,
-                    priority   = excluded.priority,
-                    enabled    = excluded.enabled,
-                    updated_at = current_timestamp
                 ''',
                 (event_type, plugin_name, params_json, priority, enabled),
             )
@@ -755,13 +751,18 @@ class Database:
             self.connection.rollback()
             return False
 
-    def delete_plugin_binding_item(self, event_type: str, plugin_name: str) -> bool:
-        """删除单条事件-插件绑定"""
+    def delete_plugin_binding_item(self, event_type: str, plugin_name: str, row_id: int | None = None) -> bool:
+        """删除单条事件-插件绑定。若提供 row_id 则按 id 精确删除，否则删除该事件下所有同名绑定"""
         try:
-            self.cursor.execute(
-                'DELETE FROM plugin_bindings WHERE event_type=? AND plugin_name=?',
-                (event_type, plugin_name)
-            )
+            if row_id is not None:
+                self.cursor.execute(
+                    'DELETE FROM plugin_bindings WHERE id=?', (row_id,)
+                )
+            else:
+                self.cursor.execute(
+                    'DELETE FROM plugin_bindings WHERE event_type=? AND plugin_name=?',
+                    (event_type, plugin_name)
+                )
             self.connection.commit()
             return True
         except sqlite3.Error as e:
