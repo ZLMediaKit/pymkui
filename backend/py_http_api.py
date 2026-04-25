@@ -1115,12 +1115,12 @@ async def plugin_save_binding(request: Request):
         if not ok:
             return {"code": -1, "msg": "数据库写入失败"}
 
-        # 立即同步到内存 registry
+        # 立即同步到内存 registry（重新从库中读取以获取最新 id）
         if enabled:
+            saved = db.get_plugin_bindings_for_event(event_type)
             registry_bindings = [
-                {"name": b.get("plugin_name") or b.get("name", ""),
-                 "params": b.get("params") or {}}
-                for b in bindings
+                {"name": r["plugin_name"], "params": r.get("params") or {}, "id": r["id"]}
+                for r in saved
             ]
             _py_plugin.registry.set_bindings(event_type, registry_bindings)
         else:
@@ -1220,7 +1220,7 @@ def _sync_bindings_from_db():
             bindings = row.get("bindings", [])
             # 过滤出 enabled=1 的绑定项
             active = [
-                {"name": b["plugin_name"], "params": b.get("params") or {}}
+                {"name": b["plugin_name"], "params": b.get("params") or {}, "id": b["id"]}
                 for b in bindings if b.get("enabled", 1)
             ]
             _py_plugin.registry.set_bindings(event_type, active)
@@ -1234,7 +1234,7 @@ def _sync_bindings_from_db_for_event(event_type: str):
     try:
         bindings = db.get_plugin_bindings_for_event(event_type)
         active = [
-            {"name": b["plugin_name"], "params": b.get("params") or {}}
+            {"name": b["plugin_name"], "params": b.get("params") or {}, "id": b["id"]}
             for b in bindings if b.get("enabled", 1)
         ]
         _py_plugin.registry.set_bindings(event_type, active)

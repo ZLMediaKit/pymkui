@@ -191,7 +191,7 @@ class PluginRegistry:
                         f"[PluginRegistry] 插件类型不匹配: {n}.type={p.type} != {event_type}"
                     )
                     continue
-                valid.append({"name": n, "params": params})
+                valid.append({"name": n, "params": params, "id": item.get("id")})
             self._bindings[event_type] = valid
             mk_logger.log_info(
                 f"[PluginRegistry] 绑定更新: {event_type} → "
@@ -251,14 +251,22 @@ class PluginRegistry:
 
         intercepted = False
         for item in items:
-            name   = item.get("name", "")
-            params = item.get("params") or {}
+            name      = item.get("name", "")
+            params    = item.get("params") or {}
+            binding_id = item.get("id")
             with self._lock:
                 plugin = self._plugins.get(name)
             if plugin is None:
                 continue
             try:
                 result = plugin.run(**kwargs, binding_params=params)
+                # 更新命中次数
+                if binding_id is not None:
+                    try:
+                        from py_http_api import db as _db
+                        _db.increment_hit_count(binding_id)
+                    except Exception:
+                        pass
                 if plugin.interruptible:
                     if result:
                         mk_logger.log_info(

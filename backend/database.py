@@ -135,6 +135,7 @@ class Database:
                 params TEXT NOT NULL DEFAULT '{}',
                 priority INTEGER NOT NULL DEFAULT 0,
                 enabled INTEGER NOT NULL DEFAULT 1,
+                hit_count INTEGER NOT NULL DEFAULT 0,
                 updated_at TIMESTAMP DEFAULT current_timestamp
             )
         ''')
@@ -217,6 +218,7 @@ class Database:
     def get_all_proxies(self, enabled_only: bool = True) -> List[Dict[str, Any]]:
         """Get all proxy configurations"""
         try:
+            cur = self._cursor()
             if enabled_only:
                 cur.execute(
                     'SELECT * FROM pull_proxies WHERE enabled = 1 ORDER BY created_at DESC'
@@ -237,6 +239,7 @@ class Database:
     def update_proxy(self, proxy_id: int, **kwargs) -> bool:
         """Update proxy configuration"""
         try:
+            cur = self._cursor()
             set_clause = []
             values = []
             
@@ -316,6 +319,7 @@ class Database:
                 clauses.append("start_time <= ?"); params.append(end_ts)
             where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
             params += [limit, offset]
+            cur = self._cursor()
             cur.execute(
                 f"SELECT * FROM recordings {where} ORDER BY start_time DESC LIMIT ? OFFSET ?",
                 params,
@@ -387,6 +391,7 @@ class Database:
             if stream:
                 clauses.append("stream = ?"); params.append(stream)
             where = "WHERE " + " AND ".join(clauses)
+            cur = self._cursor()
             cur.execute(
                 f"SELECT DISTINCT substr(created_at, 1, 10) AS d FROM recordings {where} ORDER BY d",
                 params,
@@ -399,6 +404,7 @@ class Database:
     def add_protocol_option(self, name: str, **kwargs) -> Optional[int]:
         """Add a protocol option preset"""
         try:
+            cur = self._cursor()
             fields = ['name']
             values = [name]
             placeholders = ['?']
@@ -450,6 +456,7 @@ class Database:
     def update_protocol_option(self, option_id: int, **kwargs) -> bool:
         """Update protocol option"""
         try:
+            cur = self._cursor()
             set_clause = []
             values = []
             
@@ -536,6 +543,7 @@ class Database:
     def update_pull_proxy(self, proxy_id: int, **kwargs) -> bool:
         """Update pull proxy"""
         try:
+            cur = self._cursor()
             set_clause = []
             values = []
             
@@ -710,6 +718,7 @@ class Database:
         """
         try:
             params_json = json.dumps(params or {}, ensure_ascii=False)
+            cur = self._cursor()
             cur.execute(
                 '''
                 INSERT INTO plugin_bindings (event_type, plugin_name, params, priority, enabled, updated_at)
@@ -727,6 +736,7 @@ class Database:
     def delete_plugin_binding_item(self, event_type: str, plugin_name: str, row_id: Optional[int] = None) -> bool:
         """删除单条事件-插件绑定。若提供 row_id 则按 id 精确删除，否则删除该事件下所有同名绑定"""
         try:
+            cur = self._cursor()
             if row_id is not None:
                 cur.execute(
                     'DELETE FROM plugin_bindings WHERE id=?', (row_id,)
@@ -788,6 +798,20 @@ class Database:
         except sqlite3.Error as e:
             mk_logger.log_warn(f"save_plugin_bindings_for_event error: {e}")
             self.connection.rollback()
+            return False
+
+    def increment_hit_count(self, binding_id: int) -> bool:
+        """将指定绑定记录的 hit_count 加 1"""
+        try:
+            cur = self._cursor()
+            cur.execute(
+                'UPDATE plugin_bindings SET hit_count = hit_count + 1 WHERE id = ?',
+                (binding_id,)
+            )
+            self.connection.commit()
+            return True
+        except sqlite3.Error as e:
+            mk_logger.log_warn(f"increment_hit_count error: {e}")
             return False
 
 

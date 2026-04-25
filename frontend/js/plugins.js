@@ -118,9 +118,13 @@ function renderEventBindings() {
                 const paramTag  = hasParams
                     ? `<i class="fa fa-cog text-yellow-400 ml-1 text-[10px]" title="已配置参数"></i>`
                     : '';
+                const hitCount  = b.hit_count || 0;
+                const hitTag    = hitCount > 0
+                    ? `<span class="ml-1 text-[10px] text-white/40" title="命中次数">${hitCount}</span>`
+                    : '';
                 const enabledCls = b.enabled ? 'bg-primary/20 text-primary' : 'bg-white/10 text-white/40 line-through';
                 return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-mono mr-1 mb-1 ${enabledCls}">
-                    ${escHtml(b.plugin_name)}${typeTag}${paramTag}
+                    ${escHtml(b.plugin_name)}${typeTag}${paramTag}${hitTag}
                 </span>`;
               }).join('')
             : `<span class="text-white/30 text-sm italic">未绑定</span>`;
