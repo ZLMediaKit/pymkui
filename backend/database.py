@@ -25,6 +25,7 @@ class Database:
         self.cursor.execute("PRAGMA foreign_keys = ON")
         
         self._create_tables()
+        self._migrate_plugin_bindings_unique()
     
     def _create_tables(self):
         """Create necessary tables"""
@@ -129,8 +130,7 @@ class Database:
                 params TEXT NOT NULL DEFAULT '{}',
                 priority INTEGER NOT NULL DEFAULT 0,
                 enabled INTEGER NOT NULL DEFAULT 1,
-                updated_at TIMESTAMP DEFAULT current_timestamp,
-                UNIQUE(event_type, plugin_name)
+                updated_at TIMESTAMP DEFAULT current_timestamp
             )
         ''')
 
@@ -161,6 +161,38 @@ class Database:
                 (event_type, plugin_name, params, priority, enabled),
             )
         self.connection.commit()
+
+    def _migrate_plugin_bindings_unique(self):
+        """
+        如果 plugin_bindings 表存在 UNIQUE(event_type, plugin_name) 约束，
+        则重建表去掉该约束，以支持同一插件多次绑定（multi_binding）。
+        """
+        try:
+            row = self.cursor.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='plugin_bindings'"
+            ).fetchone()
+            if row and 'UNIQUE' in (row[0] or '').upper():
+                mk_logger.log_info("迁移 plugin_bindings 表：移除 UNIQUE(event_type, plugin_name) 约束")
+                self.cursor.executescript('''
+                    BEGIN;
+                    ALTER TABLE plugin_bindings RENAME TO _plugin_bindings_old;
+                    CREATE TABLE plugin_bindings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        event_type TEXT NOT NULL,
+                        plugin_name TEXT NOT NULL,
+                        params TEXT NOT NULL DEFAULT '{}',
+                        priority INTEGER NOT NULL DEFAULT 0,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        updated_at TIMESTAMP DEFAULT current_timestamp
+                    );
+                    INSERT INTO plugin_bindings (id, event_type, plugin_name, params, priority, enabled, updated_at)
+                        SELECT id, event_type, plugin_name, params, priority, enabled, updated_at FROM _plugin_bindings_old;
+                    DROP TABLE _plugin_bindings_old;
+                    COMMIT;
+                ''')
+                mk_logger.log_info("plugin_bindings 表迁移完成")
+        except Exception as e:
+            mk_logger.log_warn(f"_migrate_plugin_bindings_unique error: {e}")
 
     def _init_default_plugin_bindings(self):
         """插入内置插件的默认绑定记录（仅首次建库、表为空时调用）"""

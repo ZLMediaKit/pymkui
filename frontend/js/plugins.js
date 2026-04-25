@@ -13,10 +13,13 @@ let _allEvents    = [];   // 支持的事件类型
 let _bindings     = [];   // 事件绑定配置（新结构）
 let _editEvent    = null; // 当前编辑的事件类型
 let _dragSource   = null; // 拖拽源元素
-// 编辑绑定弹窗中每个已选插件的临时 params（key = plugin_name）
-let _editParams   = {};
+// 编辑绑定弹窗中已绑定插件的有序数组：[{ pluginName, paramKey }, ...]
+let _selectedBindings = [];
 // 参数弹窗状态
-let _paramsPlugin = null; // 当前编辑参数的 plugin_name
+let _paramsPlugin = null; // 当前编辑参数的 paramKey
+let _paramsEvent  = null;
+// 编辑弹窗中每个绑定实例的临时 params（key = paramKey）
+let _editParams   = {};
 
 // ── API 封装 ──────────────────────────────────────────────────────
 async function apiGet(path) {
@@ -164,29 +167,28 @@ async function reloadPlugins() {
 
 // ── 编辑绑定弹窗 ───────────────────────────────────────────────────────
 function openBindingModal(eventType) {
-    _editEvent  = eventType;
-    _editParams = {};
+    _editEvent        = eventType;
+    _editParams       = {};
+    _selectedBindings = [];
 
     document.getElementById('modalEventType').textContent = eventType;
 
-    // 当前绑定
     const row      = _bindings.find(b => b.event_type === eventType) || {};
     const curBinds = row.bindings || [];
     const enabled  = curBinds.some(b => b.enabled) || curBinds.length === 0;
     document.getElementById('bindingEnabled').checked = enabled;
 
-    // 初始化临时参数
-    curBinds.forEach(b => { _editParams[b.plugin_name] = Object.assign({}, b.params || {}); });
+    // 构建已绑定列表数据并初始化参数
+    const matched = _allPlugins.filter(p => p.type === eventType);
+    curBinds.forEach((b, i) => {
+        const plugin = matched.find(p => p.name === b.plugin_name);
+        if (!plugin) return;
+        const paramKey = plugin.multi_binding ? `${b.plugin_name}#${i}` : b.plugin_name;
+        _editParams[paramKey] = Object.assign({}, b.params || {});
+        _selectedBindings.push({ pluginName: b.plugin_name, paramKey });
+    });
 
-    // 过滤类型匹配的插件
-    const matched   = _allPlugins.filter(p => p.type === eventType);
-    const selNames  = curBinds.map(b => b.plugin_name);
-    const selected  = selNames.map(n => matched.find(p => p.name === n)).filter(Boolean);
-    const available = matched.filter(p => !selNames.includes(p.name));
-
-    renderDragList('selectedPlugins', selected, true);
-    renderDragList('availablePlugins', available, false);
-
+    _renderBindingLists();
     document.getElementById('bindingModal').classList.remove('hidden');
 }
 
@@ -195,158 +197,184 @@ function closeBindingModal() {
     _editEvent = null;
 }
 
-function renderDragList(containerId, plugins, showParamsBtn) {
-    const el = document.getElementById(containerId);
-    if (!plugins.length) {
-        el.innerHTML = `<div class="text-white/30 text-xs text-center py-2 select-none pointer-events-none">
-            ${containerId === 'selectedPlugins' ? '（拖入插件以绑定）' : '（无可用插件）'}
-        </div>`;
+// ── 渲染两个列表（数据驱动）─────────────────────────────────────────
+function _renderBindingLists() {
+    _renderSelectedList();
+    _renderAvailableList();
+}
+
+function _renderSelectedList() {
+    const container = document.getElementById('selectedPlugins');
+    if (!_selectedBindings.length) {
+        container.innerHTML = `<div class="text-white/30 text-xs text-center py-3 select-none" data-hint="1">（拖入插件以绑定）</div>`;
         return;
     }
-    el.innerHTML = plugins.map(p => {
-        const typeBadge = p.interruptible !== undefined
-            ? (p.interruptible
-                ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">拦截</span>`
-                : `<span class="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">监听</span>`)
-            : '';
-        const paramsBtn = showParamsBtn
-            ? `<button type="button" onclick="openParamsModal('${escHtml(p.name)}')"
-                class="ml-auto shrink-0 text-yellow-400/70 hover:text-yellow-400 transition-colors text-xs"
-                title="编辑绑定参数">
-                <i class="fa fa-cog mr-1"></i>参数
-               </button>`
+    // 统计每个插件出现次数，用于显示序号
+    const nameCounters = {};
+    container.innerHTML = _selectedBindings.map((item, idx) => {
+        const p = _allPlugins.find(pl => pl.name === item.pluginName);
+        if (!p) return '';
+        const typeBadge = p.interruptible
+            ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">拦截</span>`
+            : `<span class="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">监听</span>`;
+        nameCounters[p.name] = (nameCounters[p.name] || 0) + 1;
+        const idxBadge = p.multi_binding
+            ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/50 font-mono">#${nameCounters[p.name]}</span>`
             : '';
         return `
-        <div class="flex items-center gap-2 bg-white/10 rounded-lg px-3 py-2 cursor-grab select-none
-            hover:bg-primary/20 transition-colors"
+        <div class="flex items-center gap-2 bg-white/10 rounded-lg px-3 py-2 cursor-grab select-none hover:bg-primary/20 transition-colors"
             draggable="true"
-            data-plugin-name="${escHtml(p.name)}"
-            data-plugin-type="${escHtml(p.type)}"
-            data-plugin-interruptible="${p.interruptible ? 'true' : 'false'}"
-            ondragstart="dragStart(event)"
-            ondragend="dragEnd(event)"
-            ondblclick="togglePluginBinding(this)">
+            data-sel-idx="${idx}"
+            ondragstart="_selDragStart(event, ${idx})"
+            ondragover="event.preventDefault()"
+            ondrop="_selDrop(event, ${idx})"
+            ondblclick="_removeSelected(${idx})">
             <i class="fa fa-grip-vertical text-white/30 text-xs shrink-0"></i>
             <span class="font-mono text-sm text-white font-semibold">${escHtml(p.name)}</span>
-            ${typeBadge}
-            <span class="text-white/40 text-xs truncate max-w-[140px]">${escHtml(p.description)}</span>
-            ${paramsBtn}
+            ${idxBadge}${typeBadge}
+            <span class="text-white/40 text-xs truncate max-w-[120px]">${escHtml(p.description)}</span>
+            <button type="button" onclick="openParamsModal('${escHtml(item.paramKey)}')"
+                class="ml-auto shrink-0 text-yellow-400/70 hover:text-yellow-400 transition-colors text-xs" title="编辑绑定参数">
+                <i class="fa fa-cog mr-1"></i>参数
+            </button>
+            <button type="button" onclick="_removeSelected(${idx})"
+                class="shrink-0 text-white/30 hover:text-red-400 transition-colors text-xs" title="移除">
+                <i class="fa fa-times"></i>
+            </button>
         </div>`;
     }).join('');
 }
 
-// ── 双击切换绑定/解绑 ─────────────────────────────────────────────────
-function togglePluginBinding(el) {
-    const srcContainer = el.parentElement;
-    const isSelected   = srcContainer.id === 'selectedPlugins';
-    const targetId     = isSelected ? 'availablePlugins' : 'selectedPlugins';
-    const target       = document.getElementById(targetId);
+function _renderAvailableList() {
+    const container = document.getElementById('availablePlugins');
+    if (!_editEvent) return;
+    const matched = _allPlugins.filter(p => p.type === _editEvent);
+    // 非 multi_binding 已绑定的排除
+    const boundNames = new Set(_selectedBindings
+        .filter(b => {
+            const p = _allPlugins.find(pl => pl.name === b.pluginName);
+            return p && !p.multi_binding;
+        })
+        .map(b => b.pluginName));
+    const available = matched.filter(p => !boundNames.has(p.name));
 
-    srcContainer.removeChild(el);
-    _refreshEmptyHint(srcContainer);
-
-    if (targetId === 'selectedPlugins') {
-        _addToSelected(el, target);
-    } else {
-        // 移回未绑定：移除参数按钮
-        const btn = el.querySelector('button');
-        if (btn) btn.remove();
-        const placeholder = target.querySelector('.pointer-events-none');
-        if (placeholder) placeholder.remove();
-        target.appendChild(el);
+    if (!available.length) {
+        container.innerHTML = `<div class="text-white/30 text-xs text-center py-3 select-none" data-hint="1">（无可用插件）</div>`;
+        return;
     }
+    container.innerHTML = available.map(p => {
+        const typeBadge = p.interruptible
+            ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">拦截</span>`
+            : `<span class="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">监听</span>`;
+        const multiBadge = p.multi_binding
+            ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400">可多绑</span>`
+            : '';
+        return `
+        <div class="flex items-center gap-2 bg-white/5 border border-dashed border-white/10 rounded-lg px-3 py-2 cursor-grab select-none hover:bg-white/10 transition-colors"
+            draggable="true"
+            data-plugin-name="${escHtml(p.name)}"
+            ondragstart="_availDragStart(event, '${escHtml(p.name)}')"
+            ondblclick="_addPlugin('${escHtml(p.name)}')">
+            <i class="fa fa-grip-vertical text-white/30 text-xs shrink-0"></i>
+            <span class="font-mono text-sm text-white font-semibold">${escHtml(p.name)}</span>
+            ${typeBadge}${multiBadge}
+            <span class="text-white/40 text-xs truncate max-w-[140px]">${escHtml(p.description)}</span>
+        </div>`;
+    }).join('');
 }
 
-// ── 将插件元素加入"已绑定"列表 ──────────────────────────────────────
-function _addToSelected(el, selectedContainer) {
-    // 清除占位提示
-    const placeholder = selectedContainer.querySelector('.pointer-events-none');
-    if (placeholder) placeholder.remove();
-
-    // 追加"参数"按钮
-    if (!el.querySelector('button[data-params-btn]')) {
-        const pName = el.dataset.pluginName;
-        const btn   = document.createElement('button');
-        btn.type      = 'button';
-        btn.dataset.paramsBtn = '1';
-        btn.className = 'ml-auto shrink-0 text-yellow-400/70 hover:text-yellow-400 transition-colors text-xs';
-        btn.title     = '编辑绑定参数';
-        btn.innerHTML = '<i class="fa fa-cog mr-1"></i>参数';
-        btn.setAttribute('onclick', `openParamsModal('${pName}')`);
-        el.appendChild(btn);
+// ── 添加插件到已绑定 ──────────────────────────────────────────────────
+function _addPlugin(pluginName) {
+    const plugin = _allPlugins.find(p => p.name === pluginName);
+    if (!plugin) return;
+    // 非 multi_binding 检查重复
+    if (!plugin.multi_binding && _selectedBindings.some(b => b.pluginName === pluginName)) {
+        showToast(`插件 "${pluginName}" 不支持多次绑定`, 'warning');
+        return;
     }
-
-    selectedContainer.appendChild(el);
-    _refreshEmptyHint(document.getElementById('availablePlugins'));
+    // 生成 paramKey
+    const count = _selectedBindings.filter(b => b.pluginName === pluginName).length;
+    const paramKey = plugin.multi_binding ? `${pluginName}#${count}` : pluginName;
+    if (!_editParams[paramKey]) {
+        // 用 schema 默认值初始化
+        const schema = plugin.params_schema || {};
+        _editParams[paramKey] = {};
+        Object.entries(schema).forEach(([k, def]) => {
+            _editParams[paramKey][k] = def.default ?? (def.type === 'protocol_option' ? {} : def.type === 'bool' ? true : '');
+        });
+    }
+    _selectedBindings.push({ pluginName, paramKey });
+    _renderBindingLists();
 }
 
-// ── 拖拽排序 ──────────────────────────────────────────────────────────
-function dragStart(e) {
-    _dragSource = e.currentTarget;
+// ── 从已绑定移除 ──────────────────────────────────────────────────────
+function _removeSelected(idx) {
+    _selectedBindings.splice(idx, 1);
+    _renderBindingLists();
+}
+
+// ── 已绑定列表拖拽排序 ────────────────────────────────────────────────
+let _selDragIdx = null;
+function _selDragStart(e, idx) {
+    _selDragIdx = idx;
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', e.currentTarget.dataset.pluginName);
-    e.currentTarget.classList.add('opacity-50');
+    e.dataTransfer.setData('text/plain', String(idx));
 }
-function dragEnd(e) {
-    e.currentTarget.classList.remove('opacity-50');
-    _dragSource = null;
+function _selDrop(e, targetIdx) {
+    e.preventDefault();
+    if (_selDragIdx === null || _selDragIdx === targetIdx) return;
+    const item = _selectedBindings.splice(_selDragIdx, 1)[0];
+    _selectedBindings.splice(targetIdx, 0, item);
+    _selDragIdx = null;
+    _renderSelectedList();
 }
+
+// ── 可用列表拖入已绑定区域 ────────────────────────────────────────────
+let _availDragName = null;
+function _availDragStart(e, pluginName) {
+    _availDragName = pluginName;
+    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData('text/plain', pluginName);
+}
+
 function dropPlugin(e, targetArea) {
     e.preventDefault();
-    if (!_dragSource) return;
-
-    const targetContainerId = targetArea === 'selected' ? 'selectedPlugins' : 'availablePlugins';
-    const targetContainer   = document.getElementById(targetContainerId);
-    const srcContainer      = _dragSource.parentElement;
-    const isReorder         = srcContainer.id === targetContainerId;
-
-    if (isReorder) {
-        const overEl = e.target.closest('[data-plugin-name]');
-        if (overEl && overEl !== _dragSource) {
-            targetContainer.insertBefore(_dragSource, overEl);
-        }
-    } else {
-        if (srcContainer && _dragSource.dataset.pluginName) {
-            srcContainer.removeChild(_dragSource);
-            _refreshEmptyHint(srcContainer);
-        }
-
-        // 移入 selectedPlugins 时走统一的独占清场逻辑
-        if (targetContainerId === 'selectedPlugins') {
-            _addToSelected(_dragSource, targetContainer);
-        } else {
-            // 移回 availablePlugins 时移除参数按钮
-            const btn = _dragSource.querySelector('button[data-params-btn]');
-            if (btn) btn.remove();
-            const placeholder = targetContainer.querySelector('.pointer-events-none');
-            if (placeholder) placeholder.remove();
-            targetContainer.appendChild(_dragSource);
+    if (targetArea === 'selected') {
+        if (_availDragName) {
+            _addPlugin(_availDragName);
+            _availDragName = null;
+        } else if (_selDragIdx !== null) {
+            // 已绑定区域内部排序在 _selDrop 处理，这里忽略
+            _selDragIdx = null;
         }
     }
+    // 拖到 available 区域不处理
 }
-function _refreshEmptyHint(container) {
-    // 先清除已有的占位提示，避免重复追加
-    container.querySelectorAll('.pointer-events-none').forEach(el => el.remove());
-    const items = container.querySelectorAll('[data-plugin-name]');
-    if (!items.length) {
-        const hint     = document.createElement('div');
-        hint.className = 'text-white/30 text-xs text-center py-2 select-none pointer-events-none';
-        hint.textContent = container.id === 'selectedPlugins' ? '（拖入插件以绑定）' : '（无可用插件）';
-        container.appendChild(hint);
-    }
+
+// ── 保留旧的 renderDragList（兼容，但不再用于选中列表）──────────────
+function renderDragList(containerId, plugins, showParamsBtn) {
+    // 仅用于可用列表的初始渲染，现已由 _renderAvailableList 替代，保留空实现防报错
 }
+
+function renderSelectedList() {
+    // 由 _renderSelectedList 替代，保留空实现
+}
+
+// ── 以下旧函数保留空实现，防止其他地方调用报错 ────────────────────────
+function togglePluginBinding() {}
+function _addToSelected() {}
+function _refreshEmptyHint() {}
+function _refreshSelectedBadges() {}
+function dragStart(e) { e.currentTarget.classList.add('opacity-50'); }
+function dragEnd(e)   { e.currentTarget.classList.remove('opacity-50'); }
 
 // ── 保存绑定 ──────────────────────────────────────────────────────────
 async function saveBinding() {
     if (!_editEvent) return;
-
-    const selectedEls = document.getElementById('selectedPlugins')
-        .querySelectorAll('[data-plugin-name]');
     const enabled = document.getElementById('bindingEnabled').checked ? 1 : 0;
-
-    const bindings = Array.from(selectedEls).map(el => ({
-        plugin_name: el.dataset.pluginName,
-        params: _editParams[el.dataset.pluginName] || {},
+    const bindings = _selectedBindings.map(item => ({
+        plugin_name: item.pluginName,
+        params: _editParams[item.paramKey] || {},
     }));
 
     try {
@@ -603,18 +631,22 @@ function _poClear(paramKey) {
     showToast('协议配置已清空', 'info');
 }
 
-async function openParamsModal(pluginName) {
-    _paramsPlugin = pluginName;
+async function openParamsModal(paramKey) {
+    _paramsPlugin = paramKey;  // 用 paramKey 作为内部标识（可能含 #N）
     _paramsEvent  = _editEvent;
-    document.getElementById('paramsPluginName').textContent = pluginName;
+    // 显示时去掉 #N 后缀只展示插件名
+    const pluginName = paramKey.includes('#') ? paramKey.split('#')[0] : paramKey;
+    const instanceNum = paramKey.includes('#') ? parseInt(paramKey.split('#')[1]) + 1 : null;
+    const displayName = instanceNum ? `${pluginName} <span class="text-white/40 font-normal text-sm">#${instanceNum}</span>` : pluginName;
+    document.getElementById('paramsPluginName').innerHTML = displayName;
     document.getElementById('paramsEventType').textContent  = _editEvent || '';
 
     const plugin = _allPlugins.find(p => p.name === pluginName);
     const schema = plugin?.params_schema || {};
-    if (!_editParams[pluginName]) _editParams[pluginName] = {};
+    if (!_editParams[paramKey]) _editParams[paramKey] = {};
     Object.entries(schema).forEach(([k, def]) => {
-        if (!_editParams[pluginName].hasOwnProperty(k)) {
-            _editParams[pluginName][k] = def.default ?? (def.type === 'protocol_option' ? {} : def.type === 'bool' ? true : '');
+        if (!_editParams[paramKey].hasOwnProperty(k)) {
+            _editParams[paramKey][k] = def.default ?? (def.type === 'protocol_option' ? {} : def.type === 'bool' ? true : '');
         }
     });
 
@@ -634,7 +666,9 @@ function closeParamsModal() {
 function renderParamsList() {
     const params    = _editParams[_paramsPlugin] || {};
     const container = document.getElementById('paramsList');
-    const plugin    = _allPlugins.find(p => p.name === _paramsPlugin);
+    // _paramsPlugin 可能是 name#N，取真实插件名
+    const pluginName = _paramsPlugin.includes('#') ? _paramsPlugin.split('#')[0] : _paramsPlugin;
+    const plugin    = _allPlugins.find(p => p.name === pluginName);
     const schema    = plugin?.params_schema || {};
     const keys      = Object.keys(schema);
 
@@ -693,7 +727,8 @@ function renderParamsList() {
 function updateParamValue(key, value) {
     if (!_editParams[_paramsPlugin]) _editParams[_paramsPlugin] = {};
     // bool 类型保存为 boolean
-    const plugin = _allPlugins.find(p => p.name === _paramsPlugin);
+    const pluginName = _paramsPlugin.includes('#') ? _paramsPlugin.split('#')[0] : _paramsPlugin;
+    const plugin = _allPlugins.find(p => p.name === pluginName);
     const schema = plugin?.params_schema || {};
     if (schema[key]?.type === 'bool') {
         _editParams[_paramsPlugin][key] = !!value;

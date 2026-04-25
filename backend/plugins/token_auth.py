@@ -185,9 +185,10 @@ class TokenAuthBase(PluginBase):
 class PlayTokenAuth(TokenAuthBase):
     name        = "play_token_auth"
     version     = "1.0.0"
-    description = "播放鉴权插件，鉴权失败后会拒绝播放请求。"
+    description = "播放鉴权插件，鉴权失败后会拒绝播放请求。支持 vhost/app/stream 通配符过滤，可多次绑定针对不同流。"
     type        = "on_play"
     interruptible = True
+    multi_binding = True
     abstract    = False
 
     _token: dict = {}   # 与 PublishTokenAuth 各自独立
@@ -204,9 +205,10 @@ class PlayTokenAuth(TokenAuthBase):
 class PublishTokenAuth(TokenAuthBase):
     name        = "publish_token_auth"
     version     = "1.0.0"
-    description = "推流鉴权插件，鉴权失败后会拒绝推流请求。可配置协议选项，鉴权通过后自动应用。"
+    description = "推流鉴权插件，鉴权失败后会拒绝推流请求。支持 vhost/app/stream 通配符过滤，可多次绑定针对不同流。可配置协议选项，鉴权通过后自动应用。"
     type        = "on_publish"
     interruptible = True
+    multi_binding = True
     abstract    = False
 
     _token: dict = {}   # 与 PlayTokenAuth 各自独立

@@ -42,6 +42,9 @@ class PluginBase:
     # abstract=True 表示该类是中间抽象基类，不会被注册为实际插件。
     # 插件加载器会跳过所有 abstract=True 的类，只注册 abstract=False 的具体插件。
     abstract = False
+    # multi_binding=True 表示该插件允许被同一事件多次绑定（例如支持流过滤的鉴权插件）。
+    # 默认 False，即每个事件只能绑定同一插件一次。
+    multi_binding = False
 
     def get_url_params(self, **kwargs) -> dict:
         """
@@ -150,6 +153,7 @@ class PluginRegistry:
                     "description": p.description,
                     "type": p.type,
                     "interruptible": p.interruptible,
+                    "multi_binding": p.multi_binding,
                     "params_schema": schema,
                 })
             return result
