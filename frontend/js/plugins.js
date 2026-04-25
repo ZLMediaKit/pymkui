@@ -385,21 +385,242 @@ async function clearBinding(eventType) {
 }
 
 // ── 参数编辑弹窗 ───────────────────────────────────────────────────────
-function openParamsModal(pluginName) {
+// 缓存协议配置列表
+let _protocolOptionsList = null;
+
+async function _loadProtocolOptionsList() {
+    if (_protocolOptionsList) return _protocolOptionsList;
+    try {
+        const res = await apiGet('/index/pyapi/get_protocol_options_list');
+        _protocolOptionsList = res.data || res.options || [];
+    } catch (e) {
+        _protocolOptionsList = [];
+    }
+    return _protocolOptionsList;
+}
+
+// protocol_option 字段分组（与协议预设界面保持一致）
+const _PROTO_GROUPS = [
+    {
+        title: '通用配置',
+        cols: 2,
+        fields: [
+            { key: 'modify_stamp',    id: 'po_modify_stamp',    label: '时间戳覆盖(modify_stamp)',        type: 'select', opts: [['0','0-绝对'],['1','1-系统'],['2','2-相对']] },
+            { key: 'enable_audio',    id: 'po_enable_audio',    label: '开启音频(enable_audio)',          type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'add_mute_audio',  id: 'po_add_mute_audio',  label: '添加静音音频(add_mute_audio)',    type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'auto_close',      id: 'po_auto_close',      label: '自动关闭(auto_close)',            type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'paced_sender_ms', id: 'po_paced_sender_ms', label: '平滑发送间隔ms(paced_sender_ms)', type: 'number' },
+        ],
+    },
+    {
+        title: '转协议开关',
+        cols: 3,
+        fields: [
+            { key: 'enable_hls',      id: 'po_enable_hls',      label: '开启HLS(enable_hls)',            type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'enable_hls_fmp4', id: 'po_enable_hls_fmp4', label: '开启HLS-FMP4(enable_hls_fmp4)',  type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'enable_mp4',      id: 'po_enable_mp4',      label: '开启MP4录制(enable_mp4)',         type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'enable_rtsp',     id: 'po_enable_rtsp',     label: '开启RTSP(enable_rtsp)',           type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'enable_rtmp',     id: 'po_enable_rtmp',     label: '开启RTMP/FLV(enable_rtmp)',       type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'enable_ts',       id: 'po_enable_ts',       label: '开启HTTP-TS(enable_ts)',          type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'enable_fmp4',     id: 'po_enable_fmp4',     label: '开启FMP4(enable_fmp4)',           type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+        ],
+    },
+    {
+        title: '按需转协议开关',
+        cols: 3,
+        fields: [
+            { key: 'hls_demand',  id: 'po_hls_demand',  label: 'HLS按需(hls_demand)',   type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'rtsp_demand', id: 'po_rtsp_demand', label: 'RTSP按需(rtsp_demand)',  type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'rtmp_demand', id: 'po_rtmp_demand', label: 'RTMP按需(rtmp_demand)',  type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'ts_demand',   id: 'po_ts_demand',   label: 'TS按需(ts_demand)',      type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'fmp4_demand', id: 'po_fmp4_demand', label: 'FMP4按需(fmp4_demand)',  type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+        ],
+    },
+    {
+        title: '录制配置',
+        cols: 2,
+        fields: [
+            { key: 'mp4_as_player',  id: 'po_mp4_as_player',  label: 'MP4计入观看数(mp4_as_player)', type: 'select', opts: [['1','1-开启'],['0','0-关闭']] },
+            { key: 'mp4_max_second', id: 'po_mp4_max_second', label: 'MP4切片大小s(mp4_max_second)',  type: 'number' },
+            { key: 'mp4_save_path',  id: 'po_mp4_save_path',  label: 'MP4保存路径(mp4_save_path)',    type: 'text'   },
+            { key: 'hls_save_path',  id: 'po_hls_save_path',  label: 'HLS保存路径(hls_save_path)',    type: 'text'   },
+        ],
+    },
+];
+// 扁平化字段列表（供读值/遍历使用）
+const _PROTO_FIELDS = _PROTO_GROUPS.flatMap(g => g.fields);
+
+// 从协议配置表单 DOM 读取当前值（只收集非空字段）
+function _readProtoFormValues() {
+    const result = {};
+    _PROTO_FIELDS.forEach(f => {
+        const el = document.getElementById(f.id);
+        if (el && el.value !== '') result[f.key] = el.value;
+    });
+    return result;
+}
+
+// 渲染 protocol_option 内嵌表单（分组布局，与协议预设界面一致）
+function _renderProtoOptionForm(paramKey, currentVal) {
+    const cur = (currentVal && typeof currentVal === 'object') ? currentVal : {};
+    const sel = (k, v) => cur[k] !== undefined && String(cur[k]) === v ? 'selected' : '';
+    const selEmpty = k => cur[k] === undefined || cur[k] === '' ? 'selected' : '';
+    const inCls = 'w-full bg-white/5 border border-white/10 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-primary/50';
+    const pk = escHtml(paramKey);
+
+    const makeSelect = (f) => `
+        <select id="${f.id}" class="${inCls}" style="color:white;" onchange="_syncProtoForm('${pk}')">
+            <option value="" ${selEmpty(f.key)}>默认</option>
+            ${f.opts.map(([v, l]) => `<option value="${v}" ${sel(f.key, v)}>${l}</option>`).join('')}
+        </select>`;
+    const makeInput = (f) => `
+        <input type="${f.type}" id="${f.id}" value="${escHtml(String(cur[f.key] ?? ''))}" placeholder="默认"
+            class="${inCls}" oninput="_syncProtoForm('${pk}')">`;
+
+    const groupsHtml = _PROTO_GROUPS.map(g => {
+        const colCls = `grid grid-cols-${g.cols} gap-2`;
+        const fieldsHtml = g.fields.map(f => `
+            <div>
+                <label class="block text-white/60 text-[11px] mb-0.5">${f.label}</label>
+                ${f.type === 'select' ? makeSelect(f) : makeInput(f)}
+            </div>`).join('');
+        return `
+        <div class="bg-white/5 rounded-lg p-3">
+            <div class="text-white/70 text-xs font-semibold mb-2 border-b border-white/10 pb-1">${g.title}</div>
+            <div class="${colCls}">${fieldsHtml}</div>
+        </div>`;
+    }).join('');
+
+    return `
+    <div class="mt-2 border border-white/10 rounded-lg overflow-hidden">
+        <!-- 工具栏 -->
+        <div class="flex gap-2 px-3 py-2 bg-white/5 border-b border-white/10">
+            <button type="button" onclick="_poLoadDefault('${pk}')"
+                class="text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-white/80 transition-colors">
+                <i class="fa fa-magic mr-1"></i>加载默认
+            </button>
+            <button type="button" onclick="_poLoadPreset('${pk}')"
+                class="text-xs px-2 py-1 rounded bg-primary/30 hover:bg-primary/50 text-white transition-colors">
+                <i class="fa fa-list mr-1"></i>从预设加载
+            </button>
+            <button type="button" onclick="_poClear('${pk}')"
+                class="text-xs px-2 py-1 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 transition-colors">
+                <i class="fa fa-eraser mr-1"></i>清空
+            </button>
+        </div>
+        <!-- 分组内容 -->
+        <div class="space-y-2 p-3">${groupsHtml}</div>
+    </div>`;
+}
+
+// 表单任意字段变化后同步回 _editParams
+function _syncProtoForm(paramKey) {
+    if (!_editParams[_paramsPlugin]) _editParams[_paramsPlugin] = {};
+    _editParams[_paramsPlugin][paramKey] = _readProtoFormValues();
+}
+
+// 加载默认（从服务器 protocol.* 配置）
+async function _poLoadDefault(paramKey) {
+    try {
+        const result = await Api.getServerConfig();
+        if (result.code === 0 && result.data && result.data.length > 0) {
+            const cfg = result.data[0] || {};
+            _PROTO_FIELDS.forEach(f => {
+                const el = document.getElementById(f.id);
+                const v = cfg[`protocol.${f.key}`];
+                if (el && v !== undefined && v !== null) el.value = String(v);
+            });
+            _syncProtoForm(paramKey);
+            showToast('已加载服务器默认协议配置', 'success');
+        } else {
+            showToast('获取服务器配置失败', 'error');
+        }
+    } catch (e) {
+        showToast('加载失败: ' + e.message, 'error');
+    }
+}
+
+// 从预设加载
+async function _poLoadPreset(paramKey) {
+    const list = await _loadProtocolOptionsList();
+    if (!list || !list.length) {
+        showToast('暂无可用预设，请先在「协议配置」中添加', 'warning');
+        return;
+    }
+    // 弹出预设选择器
+    let picker = document.getElementById('_poPresetPicker');
+    if (picker) picker.remove();
+    picker = document.createElement('div');
+    picker.id = '_poPresetPicker';
+    picker.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-[60]';
+    picker.innerHTML = `
+        <div class="bg-gray-900 rounded-xl p-6 max-w-sm w-full mx-4 border border-white/20" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-base font-bold text-white">选择协议预设</h3>
+                <button onclick="document.getElementById('_poPresetPicker').remove()" class="text-white/50 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+            <select id="_poPresetSelect" class="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm mb-4 focus:outline-none">
+                <option value="">-- 请选择预设 --</option>
+                ${list.map(p => `<option value="${p.id}">${escHtml(p.name)}</option>`).join('')}
+            </select>
+            <div class="flex justify-end gap-3">
+                <button onclick="document.getElementById('_poPresetPicker').remove()"
+                    class="px-4 py-2 rounded-lg bg-white/10 text-white text-sm hover:bg-white/20 transition-colors">取消</button>
+                <button onclick="_poApplyPreset('${escHtml(paramKey)}')"
+                    class="px-4 py-2 rounded-lg bg-primary text-white text-sm hover:bg-primary/80 transition-colors">确定</button>
+            </div>
+        </div>`;
+    picker.addEventListener('click', e => { if (e.target === picker) picker.remove(); });
+    document.body.appendChild(picker);
+}
+
+async function _poApplyPreset(paramKey) {
+    const sel = document.getElementById('_poPresetSelect');
+    if (!sel || !sel.value) { showToast('请先选择一个预设', 'warning'); return; }
+    try {
+        const res = await apiGet(`/index/pyapi/get_protocol_options?id=${sel.value}`);
+        const p = res.data || res;
+        if (!p) { showToast('获取预设详情失败', 'error'); return; }
+        _PROTO_FIELDS.forEach(f => {
+            const el = document.getElementById(f.id);
+            if (el && p[f.key] !== undefined && p[f.key] !== null) el.value = String(p[f.key]);
+        });
+        _syncProtoForm(paramKey);
+        document.getElementById('_poPresetPicker')?.remove();
+        showToast('已从预设加载协议配置', 'success');
+    } catch (e) {
+        showToast('加载失败: ' + e.message, 'error');
+    }
+}
+
+// 清空所有字段
+function _poClear(paramKey) {
+    _PROTO_FIELDS.forEach(f => {
+        const el = document.getElementById(f.id);
+        if (el) el.value = '';
+    });
+    _syncProtoForm(paramKey);
+    showToast('协议配置已清空', 'info');
+}
+
+async function openParamsModal(pluginName) {
     _paramsPlugin = pluginName;
     _paramsEvent  = _editEvent;
     document.getElementById('paramsPluginName').textContent = pluginName;
     document.getElementById('paramsEventType').textContent  = _editEvent || '';
 
-    // 用 schema 默认值初始化（仅当该 key 尚未设置时）
     const plugin = _allPlugins.find(p => p.name === pluginName);
     const schema = plugin?.params_schema || {};
     if (!_editParams[pluginName]) _editParams[pluginName] = {};
     Object.entries(schema).forEach(([k, def]) => {
         if (!_editParams[pluginName].hasOwnProperty(k)) {
-            _editParams[pluginName][k] = def.default ?? '';
+            _editParams[pluginName][k] = def.default ?? (def.type === 'protocol_option' ? {} : '');
         }
     });
+
+    // 有 protocol_option 字段时预加载预设列表
+    const hasProtoOpt = Object.values(schema).some(d => d.type === 'protocol_option');
+    if (hasProtoOpt) await _loadProtocolOptionsList();
 
     renderParamsList();
     document.getElementById('paramsModal').classList.remove('hidden');
@@ -429,17 +650,26 @@ function renderParamsList() {
         const desc = def.description
             ? `<div class="text-white/35 text-[11px] mt-0.5 leading-tight">${escHtml(def.description)}</div>`
             : '';
+
+        let inputEl = '';
+        if (def.type === 'protocol_option') {
+            inputEl = _renderProtoOptionForm(k, val);
+        } else {
+            inputEl = `
+            <input type="${def.type === 'int' ? 'number' : 'text'}"
+                value="${escHtml(String(val ?? ''))}"
+                class="w-full mt-1.5 bg-white/5 border border-white/10 rounded px-2 py-1.5 text-white text-sm
+                    focus:outline-none focus:border-primary/50"
+                onchange="updateParamValue('${escHtml(k)}', this.value)">`;
+        }
+
         return `
         <div class="bg-white/5 border border-white/10 rounded-lg px-3 py-2">
             <div class="flex items-center gap-1 mb-1">
                 <span class="font-mono text-sm text-primary font-semibold">${escHtml(k)}</span>${typeHint}
             </div>
             ${desc}
-            <input type="${def.type === 'int' ? 'number' : 'text'}"
-                value="${escHtml(String(val))}"
-                class="w-full mt-1.5 bg-white/5 border border-white/10 rounded px-2 py-1.5 text-white text-sm
-                    focus:outline-none focus:border-primary/50"
-                onchange="updateParamValue('${escHtml(k)}', this.value)">
+            ${inputEl}
         </div>`;
     }).join('');
 }

@@ -50,7 +50,7 @@ class TokenAuthBase(PluginBase):
         }
 
     # ── 子类需要实现的钩子 ────────────────────────────────────────────────────
-    def _allow(self, invoker):
+    def _allow(self, invoker, extra: dict | None = None):
         raise NotImplementedError
 
     def _deny(self, invoker, reason: str = "token error"):
@@ -82,7 +82,8 @@ class TokenAuthBase(PluginBase):
         else:
             if token_usage_count > 0:
                 self._decr_usage(vhost, app, stream)
-            self._allow(invoker)
+            # 将 binding_params 透传给 _allow，供子类按需使用（如 PublishTokenAuth 的协议配置）
+            self._allow(invoker, extra=binding_params)
         return True
 
     def get_url_params(self, **kwargs) -> dict:
@@ -148,7 +149,7 @@ class PlayTokenAuth(TokenAuthBase):
 
     _token: dict = {}   # 与 PublishTokenAuth 各自独立
 
-    def _allow(self, invoker):
+    def _allow(self, invoker, extra: dict | None = None):
         mk_loader.play_auth_invoker_do(invoker, "")
 
     def _deny(self, invoker, reason: str = "token error"):
@@ -160,15 +161,32 @@ class PlayTokenAuth(TokenAuthBase):
 class PublishTokenAuth(TokenAuthBase):
     name        = "publish_token_auth"
     version     = "1.0.0"
-    description = "推流鉴权插件，鉴权失败后会拒绝推流请求。"
+    description = "推流鉴权插件，鉴权失败后会拒绝推流请求。可配置协议选项，鉴权通过后自动应用。"
     type        = "on_publish"
     interruptible = True
     abstract    = False
 
     _token: dict = {}   # 与 PlayTokenAuth 各自独立
 
-    def _allow(self, invoker):
-        mk_loader.publish_auth_invoker_do(invoker, "")
+    def params(self) -> dict:
+        # 继承基类 token 参数，并追加协议配置选择参数
+        base = super().params()
+        base["protocol_option"] = {
+            "type": "protocol_option",
+            "description": "选择推流鉴权通过后应用的预设协议配置（可选）",
+            "default": None,
+        }
+        return base
+
+    def _allow(self, invoker, extra: dict | None = None):
+        # 从 binding_params 中取出 protocol_option，直接传入（数据库保存时已只存协议字段）
+        protocol_opt: dict = {}
+        if extra:
+            raw = extra.get("protocol_option")
+            if isinstance(raw, dict):
+                protocol_opt = raw
+        mk_logger.log_info(f"[publish_token_auth] allow, protocol_option={protocol_opt}")
+        mk_loader.publish_auth_invoker_do(invoker, "", protocol_opt)
 
     def _deny(self, invoker, reason: str = "token error"):
-        mk_loader.publish_auth_invoker_do(invoker, reason)
+        mk_loader.publish_auth_invoker_do(invoker, reason, {})
