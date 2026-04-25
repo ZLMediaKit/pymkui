@@ -9,6 +9,7 @@ Token 鉴权插件（播放 + 推流）
 import time
 import secrets
 import string
+import fnmatch
 
 import mk_loader
 import mk_logger
@@ -32,6 +33,21 @@ class TokenAuthBase(PluginBase):
     # ── 参数 schema ──────────────────────────────────────────────────────────
     def params(self) -> dict:
         return {
+            "vhost_filter": {
+                "type": "str",
+                "description": "vhost 过滤规则，支持通配符 *，默认 * 匹配所有",
+                "default": "*",
+            },
+            "app_filter": {
+                "type": "str",
+                "description": "app 过滤规则，支持通配符 *，默认 * 匹配所有",
+                "default": "*",
+            },
+            "stream_filter": {
+                "type": "str",
+                "description": "stream 过滤规则，支持通配符 *，默认 * 匹配所有，例如 test* 匹配所有 test 开头的流",
+                "default": "*",
+            },
             "expire_seconds": {
                 "type": "int",
                 "description": "token 过期时间（秒），默认 300 秒",
@@ -62,6 +78,23 @@ class TokenAuthBase(PluginBase):
         invoker        = kwargs.get("invoker")
         binding_params = kwargs.get("binding_params", {})
 
+        vhost  = args.get("vhost", "__defaultVhost__")
+        app    = args.get("app", "")
+        stream = args.get("stream", "")
+
+        # 通配符过滤：不命中则跳过，不消费事件
+        vhost_filter  = binding_params.get("vhost_filter",  "*") or "*"
+        app_filter    = binding_params.get("app_filter",    "*") or "*"
+        stream_filter = binding_params.get("stream_filter", "*") or "*"
+        if not (fnmatch.fnmatch(vhost, vhost_filter)
+                and fnmatch.fnmatch(app, app_filter)
+                and fnmatch.fnmatch(stream, stream_filter)):
+            mk_logger.log_info(
+                f"[{self.name}] skip {vhost}/{app}/{stream} "
+                f"(filter: {vhost_filter}/{app_filter}/{stream_filter})"
+            )
+            return False
+
         expire_seconds    = int(binding_params.get("expire_seconds", 300))
         token_length      = int(binding_params.get("token_length", 16))
         token_usage_count = int(binding_params.get("token_usage_count", -1))
@@ -91,6 +124,16 @@ class TokenAuthBase(PluginBase):
         app    = kwargs.get("app", "")
         stream = kwargs.get("stream", "")
         binding_params    = kwargs.get("binding_params", {})
+
+        # 不在过滤范围内则不追加 token 参数
+        vhost_filter  = binding_params.get("vhost_filter",  "*") or "*"
+        app_filter    = binding_params.get("app_filter",    "*") or "*"
+        stream_filter = binding_params.get("stream_filter", "*") or "*"
+        if not (fnmatch.fnmatch(vhost, vhost_filter)
+                and fnmatch.fnmatch(app, app_filter)
+                and fnmatch.fnmatch(stream, stream_filter)):
+            return {}
+
         expire_seconds    = int(binding_params.get("expire_seconds", 300))
         token_length      = int(binding_params.get("token_length", 16))
         token_usage_count = int(binding_params.get("token_usage_count", -1))
