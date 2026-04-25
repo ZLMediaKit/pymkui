@@ -169,14 +169,45 @@ class PublishTokenAuth(TokenAuthBase):
     _token: dict = {}   # 与 PlayTokenAuth 各自独立
 
     def params(self) -> dict:
-        # 继承基类 token 参数，并追加协议配置选择参数
+        # 继承基类 token 参数，并追加鉴权开关和协议配置选择参数
         base = super().params()
+        base["enable_auth"] = {
+            "type": "bool",
+            "description": "是否启用 token 鉴权，关闭后仅应用协议配置，不校验 token",
+            "default": True,
+        }
         base["protocol_option"] = {
             "type": "protocol_option",
-            "description": "选择推流鉴权通过后应用的预设协议配置（可选）",
-            "default": None,
+            "description": "推流鉴权通过（或鉴权关闭）后应用的协议配置（可选）",
+            "default": {},
         }
         return base
+
+    def run(self, **kwargs) -> bool:
+        binding_params = kwargs.get("binding_params", {})
+        enable_auth = binding_params.get("enable_auth", True)
+        if isinstance(enable_auth, str):
+            enable_auth = enable_auth.lower() not in ('false', '0', '')
+        if not enable_auth:
+            # 鉴权关闭：直接放行，仅应用协议配置
+            invoker = kwargs.get("invoker")
+            args    = kwargs.get("args", {})
+            vhost   = args.get("vhost", "__defaultVhost__")
+            app     = args.get("app", "")
+            stream  = args.get("stream", "")
+            mk_logger.log_info(f"[publish_token_auth] auth disabled, allow {vhost}/{app}/{stream}")
+            self._allow(invoker, extra=binding_params)
+            return True
+        return super().run(**kwargs)
+
+    def get_url_params(self, **kwargs) -> dict:
+        binding_params = kwargs.get("binding_params", {})
+        enable_auth = binding_params.get("enable_auth", True)
+        if isinstance(enable_auth, str):
+            enable_auth = enable_auth.lower() not in ('false', '0', '')
+        if not enable_auth:
+            return {}
+        return super().get_url_params(**kwargs)
 
     def _allow(self, invoker, extra: dict | None = None):
         # 从 binding_params 中取出 protocol_option，直接传入（数据库保存时已只存协议字段）

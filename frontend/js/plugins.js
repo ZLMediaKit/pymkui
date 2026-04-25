@@ -614,7 +614,7 @@ async function openParamsModal(pluginName) {
     if (!_editParams[pluginName]) _editParams[pluginName] = {};
     Object.entries(schema).forEach(([k, def]) => {
         if (!_editParams[pluginName].hasOwnProperty(k)) {
-            _editParams[pluginName][k] = def.default ?? (def.type === 'protocol_option' ? {} : '');
+            _editParams[pluginName][k] = def.default ?? (def.type === 'protocol_option' ? {} : def.type === 'bool' ? true : '');
         }
     });
 
@@ -654,6 +654,22 @@ function renderParamsList() {
         let inputEl = '';
         if (def.type === 'protocol_option') {
             inputEl = _renderProtoOptionForm(k, val);
+        } else if (def.type === 'bool') {
+            const checked = (val === true || val === 'true' || val === 1 || val === '1') ? 'checked' : '';
+            inputEl = `
+            <div class="flex items-center gap-3 mt-1.5">
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="param_bool_${escHtml(k)}" ${checked}
+                        class="sr-only peer"
+                        onchange="updateParamValue('${escHtml(k)}', this.checked)">
+                    <div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer
+                        peer-checked:after:translate-x-full peer-checked:after:border-white
+                        after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                        after:bg-white after:border-gray-300 after:border after:rounded-full
+                        after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                </label>
+                <span class="text-white/60 text-xs" id="param_bool_label_${escHtml(k)}">${val === true || val === 'true' || val === 1 ? '开启' : '关闭'}</span>
+            </div>`;
         } else {
             inputEl = `
             <input type="${def.type === 'int' ? 'number' : 'text'}"
@@ -676,7 +692,16 @@ function renderParamsList() {
 
 function updateParamValue(key, value) {
     if (!_editParams[_paramsPlugin]) _editParams[_paramsPlugin] = {};
-    _editParams[_paramsPlugin][key] = value;
+    // bool 类型保存为 boolean
+    const plugin = _allPlugins.find(p => p.name === _paramsPlugin);
+    const schema = plugin?.params_schema || {};
+    if (schema[key]?.type === 'bool') {
+        _editParams[_paramsPlugin][key] = !!value;
+        const lbl = document.getElementById(`param_bool_label_${key}`);
+        if (lbl) lbl.textContent = value ? '开启' : '关闭';
+    } else {
+        _editParams[_paramsPlugin][key] = value;
+    }
 }
 
 function saveParams() {
