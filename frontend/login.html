@@ -4,31 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>登录 - ZLMediaKit 管理系统</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#6366f1',
-                        secondary: '#8b5cf6',
-                        accent: '#ec4899',
-                        dark: '#1e293b',
-                        light: '#f8fafc',
-                    },
-                    fontFamily: {
-                        inter: ['Inter', 'system-ui', 'sans-serif'],
-                    },
-                    boxShadow: {
-                        'neon': '0 0 15px rgba(99, 102, 241, 0.5)',
-                        'neon-lg': '0 0 25px rgba(99, 102, 241, 0.6)',
-                    }
-                }
-            }
-        }
-    </script>
     <style type="text/tailwindcss">
+        @theme {
+            --color-primary: #6366f1;
+            --color-secondary: #8b5cf6;
+            --color-accent: #ec4899;
+            --color-dark: #1e293b;
+            --color-light: #f8fafc;
+
+            --font-inter: Inter, system-ui, sans-serif;
+
+            --shadow-neon: 0 0 15px rgba(99, 102, 241, 0.5);
+            --shadow-neon-lg: 0 0 25px rgba(99, 102, 241, 0.6);
+
+            --animate-float: float 6s ease-in-out infinite;
+            --animate-pulse-slow: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+            --animate-glow: glow 2s ease-in-out infinite alternate;
+
+            --animate-pulse: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
         @layer utilities {
             .content-auto {
                 content-visibility: auto;
@@ -48,27 +45,19 @@
                 color: transparent;
                 background-image: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
             }
-            .animate-float {
-                animation: float 6s ease-in-out infinite;
-            }
-            .animate-pulse-slow {
-                animation: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-            }
-            .animate-glow {
-                animation: glow 2s ease-in-out infinite alternate;
-            }
-            @keyframes float {
-                0%, 100% { transform: translateY(0px); }
-                50% { transform: translateY(-10px); }
-            }
-            @keyframes glow {
-                from {
-                    box-shadow: 0 0 10px rgba(99, 102, 241, 0.5);
-                }
-                to {
-                    box-shadow: 0 0 20px rgba(99, 102, 241, 0.8);
-                }
-            }
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+        @keyframes glow {
+            from { box-shadow: 0 0 10px rgba(99, 102, 241, 0.5); }
+            to   { box-shadow: 0 0 20px rgba(99, 102, 241, 0.8); }
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
         }
     </style>
 </head>
