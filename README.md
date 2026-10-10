@@ -14,7 +14,7 @@ PyMKUI 是一个为 [ZLMediaKit](https://github.com/ZLMediaKit/ZLMediaKit) 设�
 
 ## 功能特性
 
-- 🎬 **视频流管理** — 查看、播放、停止流，获取截图
+- 🎬 **视频流管理** — 查看、播放、停止流，获取截图；RTMP/TS 流由 h265web.js 播放
 - 📡 **拉流代理** — 多备用地址、按需/立即模式、自动故障切换、持久化恢复、在线编辑
 - 🔄 **转协议预设** — 保存多套转协议参数，拉流时一键加载，支持加载服务器默认值
 - 👥 **观众列表** — 实时查看每路流的在线观众及连接信息
@@ -148,6 +148,14 @@ curl -sv http://localhost:80/login.html
 # 应返回 HTTP/1.1 200 OK
 ```
 
+### h265web.js 播放入口
+
+视频管理页的「播放」按钮对 RTMP 和 TS 流分别使用 ZLM 的 HTTP-FLV、HTTP-TS 地址并交给 h265web.js，按当前流的 vhost 获取 `on_play` 附加参数，默认静音。播放失败时可在弹窗中重试；重试先释放旧播放器，再重新请求播放授权。Jessibuca 不再由视频管理页加载或创建。HLS、fMP4 和 WHEP 仍走各自原有播放路径。
+
+弹窗默认显示平面视频。确认当前流是 ERP 360 视频时，可点「360°模式」切换为可拖动/触摸旋转、滚轮缩放的透视视角；「重置视角」恢复初始方向，「平面模式」切回原画面。流列表没有可靠的 ERP 标记，因此不会按分辨率自动开启 360°。现有全屏和截图按钮在两种画面模式下共用。此控件只针对已由 h265web.js 接管的 RTMP/TS 行，不代表 PyMKUI 已接入 MP4/WebM 点播。
+
+播放所需 `h265web.js`、`h265web_wasm.js` 和 `h265web_wasm.wasm` 位于 `frontend/js/lib/h265web/`，应与前端一起同源提供。部署时检查 JS/WASM MIME、媒体地址的 CORS 和 WebAssembly 线程所需的跨源隔离响应头；漏掉这三件资产会使 RTMP/TS 播放入口无法启动。
+
 ---
 
 ## 界面展示
@@ -182,7 +190,7 @@ curl -sv http://localhost:80/login.html
 | 层级   | 技术                                              |
 | ------ | ------------------------------------------------- |
 | 前端   | HTML5 + Tailwind CSS + Font Awesome               |
-| 播放器 | Jessibuca (FLV)、原生 HLS、WHEP (WebRTC)          |
+| 播放器 | h265web.js (HTTP-FLV/HTTP-TS)、原生 HLS、WHEP (WebRTC) |
 | 后端   | Python + FastAPI（内嵌于 ZLMediaKit Python 插件） |
 | 数据库 | SQLite                                            |
 | 服务器 | ZLMediaKit (C++)                                  |
