@@ -156,8 +156,6 @@ curl -sv http://localhost:80/login.html
 
 播放所需 `h265web.js`、`h265web_wasm.js` 和 `h265web_wasm.wasm` 位于 `frontend/js/lib/h265web/`，应与前端一起同源提供。部署时检查 JS/WASM MIME、媒体地址的 CORS 和 WebAssembly 线程所需的跨源隔离响应头；漏掉这三件资产会使 RTMP/TS 播放入口无法启动。
 
-本机直播、点播和 VR 的格式、编码、操作及未通过项见[播放回归矩阵](docs/h265web-playback-test-matrix.md)。
-
 ---
 
 ## 界面展示
