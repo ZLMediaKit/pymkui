@@ -26,6 +26,12 @@ function cleanupStreamsPage() {
     // 清空模态框容器
     const streamsModalContainer = document.getElementById('streams-modal-container');
     if (streamsModalContainer) {
+        streamsModalContainer.querySelectorAll('[data-modal="streams"] video').forEach(video => {
+            video.pause();
+            video.removeAttribute('src');
+            video.srcObject = null;
+            video.load();
+        });
         streamsModalContainer.innerHTML = '';
     }
     sdkClose.catch(error => console.error('释放 h265web.js 失败:', error));
@@ -367,8 +373,11 @@ function playWithNative(app, stream, schema, urlParams) {
                 }
                 hlsInstance = null;
             }
-            if (video && !video.paused) {
+            if (video) {
                 video.pause();
+                video.removeAttribute('src');
+                video.srcObject = null;
+                video.load();
             }
         };
         
