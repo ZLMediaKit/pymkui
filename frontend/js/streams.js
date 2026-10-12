@@ -244,7 +244,7 @@ async function fetchPlayUrlParams(app, stream) {
 }
 
 function generateH265WebPlayUrl(info, extraParams = {}) {
-    if (info.schema !== 'rtmp' && info.schema !== 'ts') throw new Error('该协议尚未接入 h265web.js');
+    if (!['rtmp', 'ts', 'hls'].includes(info.schema)) throw new Error('该协议尚未接入 h265web.js');
     const encodePath = value => String(value || '').split('/').map(segment => {
         if (!segment || segment === '.' || segment === '..') throw new Error('媒体路径包含无效段');
         return encodeURIComponent(segment);
@@ -259,8 +259,10 @@ function generateH265WebPlayUrl(info, extraParams = {}) {
     }
     base.pathname = base.pathname.replace(/\/?$/, '/');
     base.search = '';
-    const extension = info.schema === 'ts' ? 'ts' : 'flv';
-    const url = new URL(`${app}/${stream}.live.${extension}`, base);
+    const mediaPath = info.schema === 'hls'
+        ? `${app}/${stream}/hls.m3u8`
+        : `${app}/${stream}.live.${info.schema === 'ts' ? 'ts' : 'flv'}`;
+    const url = new URL(mediaPath, base);
     baseQuery.forEach((value, key) => url.searchParams.append(key, value));
     const vhost = info.vhost || '__defaultVhost__';
     if (vhost !== '__defaultVhost__') url.searchParams.set('vhost', vhost);
@@ -302,8 +304,16 @@ async function playStreamWithH265Web(info) {
 
 async function playStream(info) {
     const {app, stream, schema} = info;
-    if (schema === 'rtmp' || schema === 'ts') {
+    const hevcVideo = info.tracks?.some(track =>
+        Number(track.codec_type) === 0 &&
+        /^(h265|hevc|hvc1|hev1)$/i.test(String(track.codec_id_name || track.codec_name || ''))
+    );
+    if (schema === 'rtmp' || schema === 'ts' || (schema === 'hls' && hevcVideo)) {
         return playStreamWithH265Web(info);
+    }
+    if (schema === 'hls.fmp4' && hevcVideo) {
+        showToast('H.265 HLS-fMP4 当前无法正常解码，请使用 RTMP、TS 或 HLS 行播放', 'error');
+        return;
     }
     const epoch = ++streamsPlaybackEpoch;
     const currentPage = () => epoch === streamsPlaybackEpoch &&
@@ -360,6 +370,7 @@ function playWithNative(app, stream, schema, urlParams) {
         console.log('原生播放URL:', playUrl);
         
         const video = document.getElementById('nativeVideo');
+        video.muted = true;
         
         let hlsInstance = null;
         
@@ -753,6 +764,7 @@ async function playWithWHEP(app, stream) {
         document.getElementById('streams-modal-container').appendChild(modal);
         
         const video = document.getElementById('whepVideo');
+        video.muted = true;
         const closeWhep = () => {
             if (peerConnection) {
                 peerConnection.close();

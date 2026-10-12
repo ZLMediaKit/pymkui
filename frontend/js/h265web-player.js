@@ -12,7 +12,7 @@ const H265WebPyMKUI = (() => {
         if (!sdkPending) {
             sdkPending = new Promise((resolve, reject) => {
                 const script = document.createElement('script');
-                script.src = new URL('h265web.js', sdkBase).href;
+                script.src = new URL('h265web.js?v=9a4b4d50', sdkBase).href;
                 script.onload = () => typeof window.H265webjsPlayer === 'function'
                     ? resolve() : reject(new Error('播放器脚本没有提供 H265webjsPlayer'));
                 script.onerror = () => reject(new Error('播放器脚本加载失败'));
@@ -202,7 +202,8 @@ const H265WebPyMKUI = (() => {
                 wasm_wasm_uri: 'h265web_wasm.wasm',
                 width: '100%', height: playerBox.clientHeight || 360,
                 auto_play: true, ignore_audio: false,
-                format_type: info.schema === 'ts' ? 'ts' : 'flv', protocol: 'http'
+                format_type: info.schema === 'hls' ? 'hls' : (info.schema === 'ts' ? 'ts' : 'flv'),
+                protocol: 'http'
             });
             if (!current()) return false;
             player.set_voice(0);
