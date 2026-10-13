@@ -150,9 +150,9 @@ curl -sv http://localhost:80/login.html
 
 ### h265web.js 播放入口
 
-视频管理页的「播放」按钮对 RTMP 和 TS 流分别使用 ZLM 的 HTTP-FLV、HTTP-TS 地址并交给 h265web.js，按当前流的 vhost 获取 `on_play` 附加参数，默认静音。播放失败时可在弹窗中重试；重试先释放旧播放器，再重新请求播放授权。Jessibuca 不再由视频管理页加载或创建。HLS、fMP4 和 WHEP 仍走各自原有播放路径。
+视频管理页的「播放」按钮对 RTMP 和 TS 流分别使用 ZLM 的 HTTP-FLV、HTTP-TS 地址并交给 h265web.js，按当前流的 vhost 获取 `on_play` 附加参数，默认静音。播放失败时可在弹窗中重试；重试先释放旧播放器，再重新请求播放授权。Jessibuca 不再由视频管理页加载或创建。H.265 MPEG-TS HLS 行也使用 h265web.js；H.264 HLS 优先保留原生播放，只在原生解码/资源错误（3/4）后重新获取授权并尝试一次 SDK MSE 播放。HTTP-fMP4 和 WHEP 保留原生播放路径。H.265 HLS-fMP4 暂不支持，页面会明确提示。
 
-弹窗默认显示平面视频。确认当前流是 ERP 360 视频时，可点「360°模式」切换为可拖动/触摸旋转、滚轮缩放的透视视角；「重置视角」恢复初始方向，「平面模式」切回原画面。流列表没有可靠的 ERP 标记，因此不会按分辨率自动开启 360°。现有全屏和截图按钮在两种画面模式下共用。此控件只针对已由 h265web.js 接管的 RTMP/TS 行，不代表 PyMKUI 已接入 MP4/WebM 点播。
+弹窗默认显示平面视频。确认当前流是 ERP 360 视频时，可点「360°模式」切换为可拖动/触摸旋转、滚轮缩放的透视视角；「重置视角」恢复初始方向，「平面模式」切回原画面。流列表没有可靠的 ERP 标记，因此不会按分辨率自动开启 360°。现有全屏和截图按钮在两种画面模式下共用。录像管理的单文件 MP4/WebM 播放也使用 h265web.js，提供播放、暂停、seek、倍速、全屏、截图和手动 360°模式；ERP 模式下可重置视角。全天跨文件播放保留原有方式。WebM 和原生 HEVC 点播受浏览器解码能力限制。
 
 播放所需 `h265web.js`、`h265web_wasm.js` 和 `h265web_wasm.wasm` 位于 `frontend/js/lib/h265web/`，应与前端一起同源提供。部署时检查 JS/WASM MIME、媒体地址的 CORS 和 WebAssembly 线程所需的跨源隔离响应头；漏掉这三件资产会使 RTMP/TS 播放入口无法启动。
 
@@ -190,7 +190,7 @@ curl -sv http://localhost:80/login.html
 | 层级   | 技术                                              |
 | ------ | ------------------------------------------------- |
 | 前端   | HTML5 + Tailwind CSS + Font Awesome               |
-| 播放器 | h265web.js (HTTP-FLV/HTTP-TS)、原生 HLS、WHEP (WebRTC) |
+| 播放器 | h265web.js（HTTP-FLV/HTTP-TS、HLS、单文件 MP4/WebM）、原生 HTTP-fMP4、WHEP (WebRTC) |
 | 后端   | Python + FastAPI（内嵌于 ZLMediaKit Python 插件） |
 | 数据库 | SQLite                                            |
 | 服务器 | ZLMediaKit (C++)                                  |

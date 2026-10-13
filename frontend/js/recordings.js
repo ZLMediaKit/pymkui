@@ -7,6 +7,7 @@ let _recSelectedStream = null;   // { vhost, app, stream }
 let _recAllStreams      = [];
 let _recCurrentList    = [];     // 当前页录像数组
 let _recSelectedDate   = '';     // 当前选中日期 YYYY-MM-DD
+let _recPlaybackGeneration = 0;
 
 // ── 页面入口 ──────────────────────────────────────────────────────────
 async function loadRecordingsPage() {
@@ -747,10 +748,13 @@ function playDayRecordings() {
     if (!date) { showToast('请先选择日期', 'error'); return; }
     const { vhost, app, stream } = _recSelectedStream;
     const params = new URLSearchParams({ vhost, app, stream, date });
+    closeRecPlayer();
+    const generation = _recPlaybackGeneration;
 
     fetch(`/index/pyapi/recordings/day?${params.toString()}`)
         .then(r => r.json())
         .then(res => {
+            if (generation !== _recPlaybackGeneration) return;
             if (res.code !== 0 || !res.data || res.data.length === 0) {
                 showToast(res.msg || '该流当天暂无录像', 'error'); return;
             }
@@ -760,6 +764,7 @@ function playDayRecordings() {
 }
 
 function _startDayPlayer(list, label) {
+    closeRecPlayer(); // Also release a single-recording SDK session before day playback.
     // 计算累积偏移
     const offsets = [0];
     for (let i = 0; i < list.length - 1; i++) {
@@ -903,6 +908,13 @@ function _dpOnFullscreenChange() {
 // ── 播放单条录像 ──────────────────────────────────────────────────────
 function playRecording(id) {
     closeRecPlayer(); // 先关闭旧弹窗
+    const record = _recCurrentList.find(item => String(item.id) === String(id));
+    const filename = record && (record.file_path || record.file_name || '');
+    const format = /\.webm$/i.test(filename) ? 'webm' : /\.(mp4|mov)$/i.test(filename) ? 'mp4' : null;
+    if (format && typeof H265WebVOD !== 'undefined') {
+        H265WebVOD.open(record, format).catch(error => console.error('录像播放器启动失败:', error));
+        return;
+    }
     const url = `/index/pyapi/recordings/file?id=${id}&disposition=inline`;
     const modal = document.createElement('div');
     modal.id = 'recPlayerModal';
@@ -928,10 +940,15 @@ function playRecording(id) {
 }
 
 function closeRecPlayer() {
+    ++_recPlaybackGeneration;
+    const modal = document.getElementById('recPlayerModal');
+    const fullscreen = document.fullscreenElement;
+    if (modal && fullscreen && (modal === fullscreen || modal.contains(fullscreen))) {
+        document.exitFullscreen().catch(() => {});
+    }
+    if (typeof H265WebVOD !== 'undefined') H265WebVOD.close().catch(error => console.error('释放录像播放器失败:', error));
     if (_dp.raf) { cancelAnimationFrame(_dp.raf); _dp.raf = null; }
     document.removeEventListener('fullscreenchange', _dpOnFullscreenChange);
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    const modal = document.getElementById('recPlayerModal');
     if (modal) {
         ['_dpVideoA', '_dpVideoB', 'recPlayerVideo'].forEach(id => {
             const v = document.getElementById(id);

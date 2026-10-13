@@ -275,15 +275,10 @@ function generateH265WebPlayUrl(info, extraParams = {}) {
     return url.href;
 }
 
-async function playStreamWithH265Web(info) {
-    if (typeof H265WebPyMKUI === 'undefined') {
-        showToast('h265web.js 适配脚本加载失败', 'error');
-        return;
-    }
-    const release = cleanupStreamsPage();
-    const epoch = streamsPlaybackEpoch;
+async function openH265WebStream(info, epoch, options = {}) {
     const currentPage = () => epoch === streamsPlaybackEpoch &&
         document.getElementById('streams-modal-container')?.isConnected;
+    if (!currentPage()) return;
     const getFreshUrl = async () => {
         const result = await Api.getPluginUrlParams(
             'on_play', info.app, info.stream, info.vhost || '__defaultVhost__'
@@ -292,13 +287,26 @@ async function playStreamWithH265Web(info) {
         return generateH265WebPlayUrl(info, result.data || {});
     };
     try {
-        await release;
-        if (!currentPage()) return;
         await H265WebPyMKUI.open(info, getFreshUrl, isCurrent => {
-            if (isCurrent() && currentPage()) return playStreamWithH265Web(info);
-        });
+            if (isCurrent() && currentPage()) return openH265WebStream(info, epoch, options);
+        }, {...options, isCurrent: currentPage});
     } catch (error) {
         if (currentPage()) showToast(error.message || '无法启动播放器', 'error');
+    }
+}
+
+async function playStreamWithH265Web(info) {
+    if (typeof H265WebPyMKUI === 'undefined') {
+        showToast('h265web.js 适配脚本加载失败', 'error');
+        return;
+    }
+    const release = cleanupStreamsPage();
+    const epoch = streamsPlaybackEpoch;
+    try {
+        await release;
+        return openH265WebStream(info, epoch);
+    } catch (error) {
+        if (epoch === streamsPlaybackEpoch) showToast(error.message || '无法释放旧播放器', 'error');
     }
 }
 
@@ -332,17 +340,17 @@ async function playStream(info) {
     } else if (schema === 'fmp4') {
         const urlParams = await fetchPlayUrlParams(app, stream);
         if (!currentPage()) return;
-        playWithNative(app, stream, schema, urlParams);
+        playWithNative(app, stream, schema, urlParams, info);
     } else if (schema === 'hls' || schema === 'hls.fmp4') {
         const urlParams = await fetchPlayUrlParams(app, stream);
         if (!currentPage()) return;
-        playWithNative(app, stream, schema, urlParams);
+        playWithNative(app, stream, schema, urlParams, info);
     } else {
         showToast('该协议暂不支持播放', 'error');
     }
 }
 
-function playWithNative(app, stream, schema, urlParams) {
+function playWithNative(app, stream, schema, urlParams, streamInfo = null) {
     try {
         const modal = document.createElement('div');
         modal.className = 'absolute inset-0 bg-black/80 flex items-center justify-center pointer-events-auto';
@@ -369,12 +377,34 @@ function playWithNative(app, stream, schema, urlParams) {
         
         console.log('原生播放URL:', playUrl);
         
-        const video = document.getElementById('nativeVideo');
+        const video = modal.querySelector('video');
         video.muted = true;
         
         let hlsInstance = null;
-        
+        let destroyed = false;
+        let nativeHls = false;
+        const epoch = streamsPlaybackEpoch;
+        const avcVideo = streamInfo?.tracks?.some(track =>
+            Number(track.codec_type) === 0 &&
+            /^(h264|avc|avc1)$/i.test(String(track.codec_id_name || track.codec_name || ''))
+        );
+        const onNativeError = () => {
+            if (destroyed || !modal.isConnected || epoch !== streamsPlaybackEpoch ||
+                !nativeHls || schema !== 'hls' || !avcVideo ||
+                ![3, 4].includes(video.error?.code)) return;
+            if (typeof H265WebPyMKUI === 'undefined') {
+                showToast('h265web.js 适配脚本加载失败', 'error');
+                return;
+            }
+            // This failure owns only this modal; other native/WHEP players keep running.
+            destroyPlayer();
+            modal.remove();
+            void openH265WebStream(streamInfo, epoch, {core: 'mse_hevc'});
+        };
         const destroyPlayer = () => {
+            if (destroyed) return;
+            destroyed = true;
+            video.removeEventListener('error', onNativeError);
             if (hlsInstance) {
                 console.log('销毁HLS播放器');
                 hlsInstance.destroy();
@@ -394,6 +424,8 @@ function playWithNative(app, stream, schema, urlParams) {
         
         if (schema === 'hls' || schema === 'hls.fmp4') {
             if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                nativeHls = true;
+                video.addEventListener('error', onNativeError);
                 video.src = playUrl;
             } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                 hlsInstance = new Hls();
@@ -417,6 +449,7 @@ function playWithNative(app, stream, schema, urlParams) {
         }
         
         video.play().catch(error => {
+            if (destroyed || !modal.isConnected || epoch !== streamsPlaybackEpoch) return;
             console.error('播放失败:', error);
             showToast('播放失败: ' + error.message, 'error');
         });

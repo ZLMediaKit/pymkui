@@ -12,7 +12,7 @@ const H265WebPyMKUI = (() => {
         if (!sdkPending) {
             sdkPending = new Promise((resolve, reject) => {
                 const script = document.createElement('script');
-                script.src = new URL('h265web.js?v=9a4b4d50', sdkBase).href;
+                script.src = new URL('h265web.js?v=fef6bf60', sdkBase).href;
                 script.onload = () => typeof window.H265webjsPlayer === 'function'
                     ? resolve() : reject(new Error('播放器脚本没有提供 H265webjsPlayer'));
                 script.onerror = () => reject(new Error('播放器脚本加载失败'));
@@ -52,8 +52,9 @@ const H265WebPyMKUI = (() => {
         return closeGeneration === generation;
     }
 
-    async function open(info, urlFactory, onRetry) {
-        if (!await close()) return false;
+    async function open(info, urlFactory, onRetry, options = {}) {
+        const allowed = options.isCurrent || (() => true);
+        if (!allowed() || !await close() || !allowed()) return false;
         const openGeneration = ++generation;
         const container = document.getElementById('streams-modal-container');
         if (!container?.isConnected) return false;
@@ -62,7 +63,7 @@ const H265WebPyMKUI = (() => {
             firstFrameTimer: null, resizeObserver: null, muted: true,
             ready: false, vrFallback: false
         };
-        const current = () => active === session && generation === openGeneration && session.modal.isConnected;
+        const current = () => allowed() && active === session && generation === openGeneration && session.modal.isConnected;
         active = session;
         session.modal.className = 'absolute inset-0 bg-black/80 flex items-center justify-center pointer-events-auto';
         session.modal.setAttribute('data-modal', 'streams');
@@ -203,7 +204,8 @@ const H265WebPyMKUI = (() => {
                 width: '100%', height: playerBox.clientHeight || 360,
                 auto_play: true, ignore_audio: false,
                 format_type: info.schema === 'hls' ? 'hls' : (info.schema === 'ts' ? 'ts' : 'flv'),
-                protocol: 'http'
+                protocol: 'http',
+                ...(options.core ? {core: options.core} : {})
             });
             if (!current()) return false;
             player.set_voice(0);
@@ -225,5 +227,5 @@ const H265WebPyMKUI = (() => {
         }
     }
 
-    return {open, close};
+    return {open, close, loadSdk, sdkBase};
 })();
