@@ -12,7 +12,7 @@ const H265WebPyMKUI = (() => {
         if (!sdkPending) {
             sdkPending = new Promise((resolve, reject) => {
                 const script = document.createElement('script');
-                script.src = new URL('h265web.js?v=fef6bf60', sdkBase).href;
+                script.src = new URL('h265web.js?v=45033916', sdkBase).href;
                 script.onload = () => typeof window.H265webjsPlayer === 'function'
                     ? resolve() : reject(new Error('播放器脚本没有提供 H265webjsPlayer'));
                 script.onerror = () => reject(new Error('播放器脚本加载失败'));

@@ -154,7 +154,7 @@ curl -sv http://localhost:80/login.html
 
 弹窗默认显示平面视频。确认当前流是 ERP 360 视频时，可点「360°模式」切换为可拖动/触摸旋转、滚轮缩放的透视视角；「重置视角」恢复初始方向，「平面模式」切回原画面。流列表没有可靠的 ERP 标记，因此不会按分辨率自动开启 360°。现有全屏和截图按钮在两种画面模式下共用。录像管理的单文件 MP4/WebM 播放也使用 h265web.js，提供播放、暂停、seek、倍速、全屏、截图和手动 360°模式；ERP 模式下可重置视角。全天跨文件播放保留原有方式。WebM 和原生 HEVC 点播受浏览器解码能力限制。
 
-播放所需 `h265web.js`、`h265web_wasm.js` 和 `h265web_wasm.wasm` 位于 `frontend/js/lib/h265web/`，应与前端一起同源提供。部署时检查 JS/WASM MIME、媒体地址的 CORS 和 WebAssembly 线程所需的跨源隔离响应头；漏掉这三件资产会使 RTMP/TS 播放入口无法启动。
+播放所需 `h265web.js`、`h265web_wasm.js` 和 `h265web_wasm.wasm` 位于 `frontend/js/lib/h265web/`，应与前端一起同源提供。当前 SDK 已移除 legacy HLS 路由，不加载 ext 文件，初始化不需要 ext 参数。部署时检查 JS/WASM MIME、媒体地址的 CORS 和 WebAssembly 线程所需的跨源隔离响应头；漏掉这三件资产会使 RTMP/TS 播放入口无法启动。
 
 ---
 
