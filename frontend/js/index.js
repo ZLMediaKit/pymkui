@@ -78,6 +78,7 @@ function navigateToStreams(vhost, app, stream) {
 }
 
 function switchTab(pageName) {
+    if (activeTab === 'recordings' && pageName !== 'recordings' && typeof closeRecPlayer === 'function') closeRecPlayer();
     activeTab = pageName;
     
     const pages = document.querySelectorAll('.page');
@@ -117,6 +118,8 @@ function closeTab(pageName, event) {
     // 清理模态框和播放器
     if (pageName === 'streams' && typeof cleanupStreamsPage === 'function') {
         cleanupStreamsPage();
+    } else if (pageName === 'recordings' && typeof closeRecPlayer === 'function') {
+        closeRecPlayer();
     } else if (pageName === 'pull-proxy' && typeof cleanupPullProxyPage === 'function') {
         cleanupPullProxyPage();
     } else if (pageName === 'protocol-options') {

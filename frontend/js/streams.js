@@ -1,20 +1,15 @@
-const jessibucaInstances = [];
 const hlsInstances = [];
+const whepConnections = new Set();
+let currentStreamRows = [];
+let streamsPlaybackEpoch = 0;
 
 function cleanupStreamsPage() {
+    ++streamsPlaybackEpoch;
+    const sdkClose = typeof H265WebPyMKUI === 'undefined'
+        ? Promise.resolve(true) : H265WebPyMKUI.close();
     console.log('清理视频管理页面资源，销毁所有播放器实例');
-    
-    // 销毁Jessibuca播放器实例
-    jessibucaInstances.forEach(instance => {
-        try {
-            if (instance) {
-                instance.destroy();
-            }
-        } catch (error) {
-            console.error('销毁Jessibuca播放器实例失败:', error);
-        }
-    });
-    jessibucaInstances.length = 0;
+    whepConnections.forEach(connection => connection.close());
+    whepConnections.clear();
     
     // 销毁HLS播放器实例
     hlsInstances.forEach(instance => {
@@ -31,8 +26,16 @@ function cleanupStreamsPage() {
     // 清空模态框容器
     const streamsModalContainer = document.getElementById('streams-modal-container');
     if (streamsModalContainer) {
+        streamsModalContainer.querySelectorAll('[data-modal="streams"] video').forEach(video => {
+            video.pause();
+            video.removeAttribute('src');
+            video.srcObject = null;
+            video.load();
+        });
         streamsModalContainer.innerHTML = '';
     }
+    sdkClose.catch(error => console.error('释放 h265web.js 失败:', error));
+    return sdkClose;
 }
 
 async function loadStreams() {
@@ -68,6 +71,7 @@ async function loadStreams() {
         
         if (result.code === 0) {
             const data = result.data || [];
+            currentStreamRows = data;
             
             console.log('流列表数据:', data);
             
@@ -83,7 +87,7 @@ async function loadStreams() {
             }
             
             let html = '';
-            data.forEach(stream => {
+            data.forEach((stream, rowIndex) => {
                 console.log('流数据:', stream);
                 const vhost = stream.vhost || '__defaultVhost__';
                 const readerCount = stream.readerCount || 0;
@@ -115,14 +119,26 @@ async function loadStreams() {
                         <td class="p-4 text-white">${bitrate}</td>
                         <td class="p-4 text-white" style="white-space: pre-line;">${tracksInfo}</td>
                         <td class="p-4">
-                            <button class="bg-gradient-primary text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors mr-2" onclick="playStream('${stream.app}', '${stream.stream}', '${stream.schema}')">播放</button>
-                            <button class="bg-gradient-accent text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors" onclick="showStreamInfo('${stream.schema}', '${vhost}', '${stream.app}', '${stream.stream}')">查看</button>
+                            <button class="bg-gradient-primary text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors mr-2" data-stream-action="play" data-row-index="${rowIndex}">播放</button>
+                            <button class="bg-gradient-accent text-white px-3 py-1 rounded-lg text-sm font-semibold hover:shadow-neon transition-colors" data-stream-action="info" data-row-index="${rowIndex}">查看</button>
                         </td>
                     </tr>
                 `;
             });
             
             tbody.innerHTML = html;
+            tbody.onclick = event => {
+                const button = event.target.closest('[data-stream-action]');
+                if (!button || !tbody.contains(button)) return;
+                const row = currentStreamRows[Number(button.dataset.rowIndex)];
+                if (!row) return;
+                const vhost = row.vhost || '__defaultVhost__';
+                if (button.dataset.streamAction === 'info') {
+                    showStreamInfo(row.schema, vhost, row.app, row.stream);
+                } else {
+                    playStream(row);
+                }
+            };
         } else {
             tbody.innerHTML = `
                 <tr>
@@ -227,28 +243,114 @@ async function fetchPlayUrlParams(app, stream) {
     return null;
 }
 
-async function playStream(app, stream, schema) {
+function generateH265WebPlayUrl(info, extraParams = {}) {
+    if (!['rtmp', 'ts', 'hls'].includes(info.schema)) throw new Error('该协议尚未接入 h265web.js');
+    const encodePath = value => String(value || '').split('/').map(segment => {
+        if (!segment || segment === '.' || segment === '..') throw new Error('媒体路径包含无效段');
+        return encodeURIComponent(segment);
+    }).join('/');
+    const app = encodePath(info.app);
+    const stream = encodePath(info.stream);
+    const base = new URL(Api.getBaseUrl(), window.location.href);
+    if (base.protocol !== 'http:' && base.protocol !== 'https:') throw new Error('媒体服务地址必须使用 HTTP 或 HTTPS');
+    const baseQuery = new URLSearchParams(base.search);
+    for (const key of ['vhost', 'app', 'stream']) {
+        if (baseQuery.has(key)) throw new Error('媒体服务地址参数与流身份冲突');
+    }
+    base.pathname = base.pathname.replace(/\/?$/, '/');
+    base.search = '';
+    const mediaPath = info.schema === 'hls'
+        ? `${app}/${stream}/hls.m3u8`
+        : `${app}/${stream}.live.${info.schema === 'ts' ? 'ts' : 'flv'}`;
+    const url = new URL(mediaPath, base);
+    baseQuery.forEach((value, key) => url.searchParams.append(key, value));
+    const vhost = info.vhost || '__defaultVhost__';
+    if (vhost !== '__defaultVhost__') url.searchParams.set('vhost', vhost);
+    Object.entries(extraParams).forEach(([key, value]) => {
+        if (key === 'vhost' || key === 'app' || key === 'stream') {
+            throw new Error('播放授权参数与流身份冲突');
+        }
+        url.searchParams.set(key, String(value));
+    });
+    return url.href;
+}
+
+async function openH265WebStream(info, epoch, options = {}) {
+    const currentPage = () => epoch === streamsPlaybackEpoch &&
+        document.getElementById('streams-modal-container')?.isConnected;
+    if (!currentPage()) return;
+    const getFreshUrl = async () => {
+        const result = await Api.getPluginUrlParams(
+            'on_play', info.app, info.stream, info.vhost || '__defaultVhost__'
+        );
+        if (!result || result.code !== 0) throw new Error('获取播放授权参数失败');
+        return generateH265WebPlayUrl(info, result.data || {});
+    };
+    try {
+        await H265WebPyMKUI.open(info, getFreshUrl, isCurrent => {
+            if (isCurrent() && currentPage()) return openH265WebStream(info, epoch, options);
+        }, {...options, isCurrent: currentPage});
+    } catch (error) {
+        if (currentPage()) showToast(error.message || '无法启动播放器', 'error');
+    }
+}
+
+async function playStreamWithH265Web(info) {
+    if (typeof H265WebPyMKUI === 'undefined') {
+        showToast('h265web.js 适配脚本加载失败', 'error');
+        return;
+    }
+    const release = cleanupStreamsPage();
+    const epoch = streamsPlaybackEpoch;
+    try {
+        await release;
+        return openH265WebStream(info, epoch);
+    } catch (error) {
+        if (epoch === streamsPlaybackEpoch) showToast(error.message || '无法释放旧播放器', 'error');
+    }
+}
+
+async function playStream(info) {
+    const {app, stream, schema} = info;
+    const hevcVideo = info.tracks?.some(track =>
+        Number(track.codec_type) === 0 &&
+        /^(h265|hevc|hvc1|hev1)$/i.test(String(track.codec_id_name || track.codec_name || ''))
+    );
+    if (schema === 'rtmp' || schema === 'ts' || (schema === 'hls' && hevcVideo)) {
+        return playStreamWithH265Web(info);
+    }
+    if (schema === 'hls.fmp4' && hevcVideo) {
+        showToast('H.265 HLS-fMP4 当前无法正常解码，请使用 RTMP、TS 或 HLS 行播放', 'error');
+        return;
+    }
+    const epoch = ++streamsPlaybackEpoch;
+    const currentPage = () => epoch === streamsPlaybackEpoch &&
+        document.getElementById('streams-modal-container')?.isConnected;
+    try {
+        if (typeof H265WebPyMKUI !== 'undefined') await H265WebPyMKUI.close();
+        if (!currentPage()) return;
+    } catch (error) {
+        if (currentPage()) showToast('旧播放器尚未释放，请重试', 'error');
+        return;
+    }
     console.log('播放流:', app, stream, schema);
     
     if (schema === 'rtsp') {
         playWithWHEP(app, stream);
     } else if (schema === 'fmp4') {
         const urlParams = await fetchPlayUrlParams(app, stream);
-        playWithNative(app, stream, schema, urlParams);
-    } else if (schema === 'rtmp') {
-        const urlParams = await fetchPlayUrlParams(app, stream);
-        playWithJessibuca(app, stream, schema, urlParams);
+        if (!currentPage()) return;
+        playWithNative(app, stream, schema, urlParams, info);
     } else if (schema === 'hls' || schema === 'hls.fmp4') {
         const urlParams = await fetchPlayUrlParams(app, stream);
-        playWithNative(app, stream, schema, urlParams);
-    } else if (schema === 'ts') {
-        showToast('TS协议暂不支持播放', 'error');
+        if (!currentPage()) return;
+        playWithNative(app, stream, schema, urlParams, info);
     } else {
         showToast('该协议暂不支持播放', 'error');
     }
 }
 
-function playWithNative(app, stream, schema, urlParams) {
+function playWithNative(app, stream, schema, urlParams, streamInfo = null) {
     try {
         const modal = document.createElement('div');
         modal.className = 'absolute inset-0 bg-black/80 flex items-center justify-center pointer-events-auto';
@@ -275,11 +377,34 @@ function playWithNative(app, stream, schema, urlParams) {
         
         console.log('原生播放URL:', playUrl);
         
-        const video = document.getElementById('nativeVideo');
+        const video = modal.querySelector('video');
+        video.muted = true;
         
         let hlsInstance = null;
-        
+        let destroyed = false;
+        let nativeHls = false;
+        const epoch = streamsPlaybackEpoch;
+        const avcVideo = streamInfo?.tracks?.some(track =>
+            Number(track.codec_type) === 0 &&
+            /^(h264|avc|avc1)$/i.test(String(track.codec_id_name || track.codec_name || ''))
+        );
+        const onNativeError = () => {
+            if (destroyed || !modal.isConnected || epoch !== streamsPlaybackEpoch ||
+                !nativeHls || schema !== 'hls' || !avcVideo ||
+                ![3, 4].includes(video.error?.code)) return;
+            if (typeof H265WebPyMKUI === 'undefined') {
+                showToast('h265web.js 适配脚本加载失败', 'error');
+                return;
+            }
+            // This failure owns only this modal; other native/WHEP players keep running.
+            destroyPlayer();
+            modal.remove();
+            void openH265WebStream(streamInfo, epoch, {core: 'mse_hevc'});
+        };
         const destroyPlayer = () => {
+            if (destroyed) return;
+            destroyed = true;
+            video.removeEventListener('error', onNativeError);
             if (hlsInstance) {
                 console.log('销毁HLS播放器');
                 hlsInstance.destroy();
@@ -289,13 +414,18 @@ function playWithNative(app, stream, schema, urlParams) {
                 }
                 hlsInstance = null;
             }
-            if (video && !video.paused) {
+            if (video) {
                 video.pause();
+                video.removeAttribute('src');
+                video.srcObject = null;
+                video.load();
             }
         };
         
         if (schema === 'hls' || schema === 'hls.fmp4') {
             if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                nativeHls = true;
+                video.addEventListener('error', onNativeError);
                 video.src = playUrl;
             } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                 hlsInstance = new Hls();
@@ -319,6 +449,7 @@ function playWithNative(app, stream, schema, urlParams) {
         }
         
         video.play().catch(error => {
+            if (destroyed || !modal.isConnected || epoch !== streamsPlaybackEpoch) return;
             console.error('播放失败:', error);
             showToast('播放失败: ' + error.message, 'error');
         });
@@ -641,15 +772,17 @@ function renderStreamInfo(data, vhost, app, stream) {
 }
 
 async function playWithWHEP(app, stream) {
+    let peerConnection = null;
+    let modal = null;
     try {
-        const modal = document.createElement('div');
+        modal = document.createElement('div');
         modal.className = 'absolute inset-0 bg-black/80 flex items-center justify-center pointer-events-auto';
         modal.setAttribute('data-modal', 'streams');
         modal.innerHTML = `
             <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 border border-white/20" onclick="event.stopPropagation()">
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-xl font-bold text-white">播放流: ${app}/${stream}</h3>
-                    <button class="text-white/60 hover:text-white" onclick="this.closest('.absolute').remove()">
+                    <button class="text-white/60 hover:text-white">
                         <i class="fa fa-times text-2xl"></i>
                     </button>
                 </div>
@@ -663,19 +796,27 @@ async function playWithWHEP(app, stream) {
         `;
         document.getElementById('streams-modal-container').appendChild(modal);
         
-        modal.addEventListener('click', function(e) {
-            if (e.target === modal) {
-                modal.remove();
-            }
-        });
-        
         const video = document.getElementById('whepVideo');
-        
-        const peerConnection = new RTCPeerConnection({
+        video.muted = true;
+        const closeWhep = () => {
+            if (peerConnection) {
+                peerConnection.close();
+                whepConnections.delete(peerConnection);
+            }
+            video.srcObject = null;
+            modal.remove();
+        };
+        modal.addEventListener('click', event => {
+            if (event.target === modal) closeWhep();
+        });
+        modal.querySelector('button').addEventListener('click', closeWhep);
+
+        peerConnection = new RTCPeerConnection({
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' }
             ]
         });
+        whepConnections.add(peerConnection);
         
         peerConnection.addTransceiver('video', { direction: 'recvonly' });
         peerConnection.addTransceiver('audio', { direction: 'recvonly' });
@@ -689,11 +830,13 @@ async function playWithWHEP(app, stream) {
         };
         
         const offer = await peerConnection.createOffer();
+        if (!modal.isConnected) return;
         await peerConnection.setLocalDescription(offer);
+        if (!modal.isConnected) return;
         
         const whepUrlParams = await fetchPlayUrlParams(app, stream);
+        if (!modal.isConnected) return;
         const whepUrl = generatePlayUrl(app, stream, 'rtsp', whepUrlParams);
-        console.log('发送WHEP请求到:', whepUrl);
         
         const response = await fetch(whepUrl, {
             method: 'POST',
@@ -703,12 +846,14 @@ async function playWithWHEP(app, stream) {
             body: offer.sdp,
             credentials: 'include'
         });
+        if (!modal.isConnected) return;
         
         if (!response.ok) {
             throw new Error(`WHEP服务器返回错误: ${response.status}`);
         }
         
         const answerSDP = await response.text();
+        if (!modal.isConnected) return;
         await peerConnection.setRemoteDescription(new RTCSessionDescription({
             type: 'answer',
             sdp: answerSDP
@@ -716,149 +861,14 @@ async function playWithWHEP(app, stream) {
         
         console.log('WHEP播放成功');
         
-        modal.querySelector('button').addEventListener('click', () => {
-            peerConnection.close();
-            video.srcObject = null;
-        });
-        
     } catch (error) {
+        if (peerConnection) {
+            peerConnection.close();
+            whepConnections.delete(peerConnection);
+        }
+        if (modal) modal.remove();
         console.error('WHEP播放失败:', error);
         showToast('播放失败: ' + error.message, 'error');
-    }
-}
-
-function playWithJessibuca(app, stream, schema, urlParams) {
-    try {
-        const modal = document.createElement('div');
-        modal.className = 'absolute inset-0 bg-black/80 flex items-center justify-center pointer-events-auto';
-        modal.setAttribute('data-modal', 'streams');
-        modal.innerHTML = `
-            <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 border border-white/20" onclick="event.stopPropagation()">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-xl font-bold text-white">播放流: ${app}/${stream}</h3>
-                    <button class="text-white/60 hover:text-white" onclick="this.closest('.absolute').remove()">
-                        <i class="fa fa-times text-2xl"></i>
-                    </button>
-                </div>
-                <div class="aspect-video bg-black rounded-lg overflow-hidden">
-                    <div id="jessibucaContainer" class="w-full h-full"></div>
-                </div>
-                <div class="mt-4 text-white/60 text-sm">
-                    协议: ${schema.toUpperCase()} | 应用: ${app} | 流: ${stream}
-                </div>
-            </div>
-        `;
-        document.getElementById('streams-modal-container').appendChild(modal);
-        
-        const playUrl = generatePlayUrl(app, stream, schema, urlParams);
-        
-        console.log('Jessibuca播放URL:', playUrl);
-        
-        let jessibucaInstance = null;
-        
-        const destroyPlayer = () => {
-            if (jessibucaInstance) {
-                console.log('销毁Jessibuca播放器');
-                jessibucaInstance.destroy();
-                const index = jessibucaInstances.indexOf(jessibucaInstance);
-                if (index > -1) {
-                    jessibucaInstances.splice(index, 1);
-                }
-                jessibucaInstance = null;
-            }
-        };
-        
-        modal.addEventListener('click', function(e) {
-            if (e.target === modal) {
-                destroyPlayer();
-                modal.remove();
-            }
-        });
-        
-        if (window.Jessibuca) {
-            jessibucaInstance = initJessibucaPlayer(playUrl, modal, destroyPlayer);
-        } else {
-            const script = document.createElement('script');
-            script.src = 'js/lib/jessibuca.js';
-            script.onload = () => {
-                console.log('Jessibuca播放器加载成功');
-                jessibucaInstance = initJessibucaPlayer(playUrl, modal, destroyPlayer);
-            };
-            script.onerror = () => {
-                console.error('加载Jessibuca播放器失败');
-                showToast('加载播放器失败', 'error');
-            };
-            document.head.appendChild(script);
-        }
-        
-    } catch (error) {
-        console.error('Jessibuca播放失败:', error);
-        showToast('播放失败: ' + error.message, 'error');
-    }
-}
-
-function initJessibucaPlayer(playUrl, modal, destroyCallback) {
-    try {
-        const jessibuca = new window.Jessibuca({
-            container: document.getElementById('jessibucaContainer'),
-            videoBuffer: 0.5,
-            isResize: true,
-            loadingText: '加载中...',
-            hasAudio: true,
-            hasVideo: true,
-            debug: true,
-            supportDblclickFullscreen: true,
-            showBandwidth: true,
-            operateBtns: {
-                fullscreen: true,
-                screenshot: true,
-                play: true,
-                audio: true
-            },
-            forceNoOffscreen: true,
-            isNotMute: true,
-            timeout: 10,
-            heartTimeout: 10,
-            heartTimeoutReplay: true,
-            heartTimeoutReplayTimes: 3,
-            wasmDecodeErrorReplay: true,
-            decoder: 'js/lib/decoder.js'
-        });
-        
-        jessibuca.on('play', () => {
-            console.log('Jessibuca开始播放');
-        });
-        
-        jessibuca.on('pause', () => {
-            console.log('Jessibuca暂停播放');
-        });
-        
-        jessibuca.on('error', (error) => {
-            console.error('Jessibuca播放错误:', error);
-            showToast('播放错误: ' + JSON.stringify(error), 'error');
-        });
-        
-        jessibuca.on('timeout', () => {
-            console.error('Jessibuca播放超时');
-            showToast('播放超时，请检查流地址', 'error');
-        });
-        
-        console.log('开始播放:', playUrl);
-        jessibuca.play(playUrl);
-        
-        jessibucaInstances.push(jessibuca);
-        
-        modal.querySelector('button').addEventListener('click', () => {
-            if (destroyCallback) {
-                destroyCallback();
-            }
-        });
-        
-        return jessibuca;
-    } catch (error) {
-        console.error('初始化Jessibuca播放器失败:', error);
-        showToast('初始化播放器失败: ' + error.message, 'error');
-        return null;
     }
 }
 
