@@ -92,7 +92,7 @@ pip install -r requirements.txt
 ```
 
 <details>
-<summary>conda / venv 方式</summary>
+<summary>conda / venv / uv 方式</summary>
 
 ```bash
 # conda
@@ -104,6 +104,9 @@ python -m venv venv && source venv/bin/activate && pip install -r requirements.t
 
 # venv (Windows)
 python -m venv venv && venv\Scripts\activate && pip install -r requirements.txt
+
+# uv
+uv sync
 ```
 
 </details>
