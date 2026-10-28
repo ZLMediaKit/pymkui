@@ -807,6 +807,7 @@ function _startDayPlayer(list, label) {
                     style="min-height:200px;"></video>
                 <video id="_dpVideoB" preload="auto" style="display:none"></video>
             </div>
+            <p class="px-4 pt-2 text-white/60 text-sm" data-native-enhancement-info>全天播放使用连续录像时间轴。要体验音量均衡和 SDR 超分，请在录像列表中单独播放 MP4 或 WebM 文件。</p>
             <!-- 自定义进度条 -->
             <div class="px-4 pt-2 pb-3 bg-gray-900 select-none" id="_dpControlBar">
                 <div id="_dpTrack" class="relative h-2 bg-white/20 rounded-full cursor-pointer"
@@ -930,6 +931,7 @@ function playRecording(id) {
                     class="w-full rounded-lg max-h-[70vh] bg-black outline-none"
                     style="min-height:200px;"></video>
             </div>
+            <p class="px-4 pb-3 text-white/60 text-sm" data-native-enhancement-info>当前文件使用原生播放器。单文件 MP4、MOV 和 WebM 的 SDK 播放入口提供音量均衡与 SDR 超分。</p>
         </div>`;
     modal.addEventListener('click', e => { if (e.target === modal) closeRecPlayer(); });
     document.body.appendChild(modal);

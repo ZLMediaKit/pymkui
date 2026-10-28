@@ -369,6 +369,7 @@ function playWithNative(app, stream, schema, urlParams, streamInfo = null) {
                 <div class="mt-4 text-white/60 text-sm">
                     协议: ${schema.toUpperCase()} | 应用: ${app} | 流: ${stream}
                 </div>
+                <p class="mt-2 text-white/60 text-sm" data-native-enhancement-info>当前使用原生播放器。要体验音量均衡和 SDR 超分，请关闭此窗口，在同一流的 RTMP 或 TS 行打开 SDK 播放器。</p>
             </div>
         `;
         document.getElementById('streams-modal-container').appendChild(modal);
@@ -792,6 +793,7 @@ async function playWithWHEP(app, stream) {
                 <div class="mt-4 text-white/60 text-sm">
                     协议: WHEP (WebRTC) | 应用: ${app} | 流: ${stream}
                 </div>
+                <p class="mt-2 text-white/60 text-sm" data-native-enhancement-info>当前使用 WHEP 原生播放器。音量均衡和 SDR 超分位于同一流 RTMP 或 TS 行的 SDK 播放器中。</p>
             </div>
         `;
         document.getElementById('streams-modal-container').appendChild(modal);
