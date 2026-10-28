@@ -9,6 +9,7 @@ const H265WebVOD = (() => {
         if (session) {
             clearTimeout(session.timer);
             session.observer?.disconnect();
+            session.enhancements?.unbind();
             session.modal.remove();
             if (session.player) {
                 releasePending = new Promise((resolve, reject) => {
@@ -24,7 +25,7 @@ const H265WebVOD = (() => {
         await pending;
         if (epoch !== generation) return;
         const session = {modal: document.createElement('div'), player: null, muted: true,
-            duration: 0, ready: false, dragging: false, paused: false};
+            duration: 0, ready: false, dragging: false, paused: false, playbackRevision: 0, enhancements: null, projection: 'flat'};
         active = session;
         const current = () => active === session && generation === epoch && session.modal.isConnected;
         const modal = session.modal;
@@ -41,6 +42,7 @@ const H265WebVOD = (() => {
                 <button data-vod="vr">360°模式</button><button data-vod="reset" hidden>重置视角</button>
                 <select data-vod="rate" aria-label="播放速度"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="4">4×</option></select>
             </div>
+            <fieldset data-vod="enhancements" data-locale="zh" class="text-white"></fieldset>
             <div data-vod="hint" hidden class="text-white/60 text-sm mt-2">拖动或触摸调整视角，滚轮缩放</div>
             <img data-vod="capture" hidden style="max-width:100%" alt="录像截图">
         </div>`;
@@ -94,6 +96,7 @@ const H265WebVOD = (() => {
         action('vr', player => {
             const next = player.get_vr_view().projection === 'erp360' ? 'flat' : 'erp360';
             if (!player.set_projection(next)) return fail('画面模式切换失败');
+            session.projection = next;
             player.set_vr_controls({mouse: next === 'erp360', touch: next === 'erp360'});
             status();
         });
@@ -106,50 +109,86 @@ const H265WebVOD = (() => {
         el('rate').addEventListener('change', () => {
             if (current() && session.ready) session.player.set_playback_rate(Number(el('rate').value));
         });
-        try {
-            await H265WebPyMKUI.loadSdk();
-            if (!current()) return;
-            const player = session.player = window.H265webjsPlayer();
-            player.video_probe_callback = info => {
-                if (!current()) return;
-                session.duration = Number(info.duration) > 0 ? Number(info.duration) : 0;
-                el('seek').max = session.duration;
-                el('seek').disabled = session.duration <= 0;
-                progress(0);
-            };
-            player.on_play_time = progress;
-            player.on_play_finished = () => { session.paused = true; status(); };
-            player.on_ready_show_done_callback = () => {
-                if (!current()) return;
-                clearTimeout(session.timer);
-                session.ready = true;
-                el('controls').querySelectorAll('button,select').forEach(button => { button.disabled = false; });
-                status();
-            };
-            player.on_error_callback = error => {
-                if (!current()) return;
-                if (error?.domain === 'vr' && error.fatal === false) {
-                    el('reset').hidden = true; el('hint').hidden = true;
-                    fail('360°显示不可用，继续平面播放');
-                } else {
-                    fail(error?.status ? `录像播放失败（HTTP ${error.status}）` : '录像播放失败，请检查文件和浏览器支持');
+        async function startPlayback() {
+            const revision = ++session.playbackRevision;
+            const loading = () => current() && session.playbackRevision === revision;
+            clearTimeout(session.timer);
+            session.observer?.disconnect(); session.observer = null;
+            const previous = session.player;
+            session.player = null;
+            session.enhancements?.unbind();
+            session.ready = false; session.paused = false;
+            session.dragging = false; session.duration = 0;
+            el('seek').disabled = true;
+            el('controls').querySelectorAll('button,select').forEach(button => { button.disabled = true; });
+            progress(0);
+            try {
+                if (previous) {
+                    releasePending = new Promise((resolve, reject) => {
+                        try { previous.release(resolve); } catch (error) { reject(error); }
+                    });
                 }
-            };
-            player.build({player_id: box.id, base_url: H265WebPyMKUI.sdkBase,
-                wasm_js_uri: 'h265web_wasm.js', wasm_wasm_uri: 'h265web_wasm.wasm',
-                width: '100%', height: box.clientHeight || 360, auto_play: true,
-                ignore_audio: false, format_type: format, protocol: 'http'});
-            if (!current()) return;
-            player.set_voice(0);
-            session.timer = setTimeout(() => fail('等待录像首帧超时'), 30000);
-            player.load_media(`/index/pyapi/recordings/file?id=${encodeURIComponent(record.id)}&disposition=inline`);
-            if (typeof ResizeObserver === 'function') {
-                session.observer = new ResizeObserver(() => {
-                    if (current()) player.resize(box.clientWidth, box.clientHeight);
-                });
-                session.observer.observe(box);
-            }
-        } catch (error) { fail(error.message || '播放器启动失败'); }
+                await releasePending;
+                if (!loading()) return false;
+                await H265WebPyMKUI.loadSdk();
+                if (!loading()) return false;
+                if (!session.enhancements) {
+                    session.enhancements = window.createPlaybackEnhancementControls(el('enhancements'), () => session.player,
+                        {recreate: () => current() ? startPlayback() : false, play: () => el('play').click()});
+                }
+                const player = session.player = window.H265webjsPlayer();
+                const ownsPlayer = () => loading() && session.player === player;
+                player.video_probe_callback = info => {
+                    if (!ownsPlayer()) return;
+                    session.duration = Number(info.duration) > 0 ? Number(info.duration) : 0;
+                    el('seek').max = session.duration;
+                    el('seek').disabled = session.duration <= 0;
+                    progress(0);
+                };
+                player.on_play_time = seconds => { if (ownsPlayer()) progress(seconds); };
+                player.on_play_finished = () => { if (ownsPlayer()) { session.paused = true; status(); } };
+                player.on_ready_show_done_callback = () => {
+                    if (!ownsPlayer()) return;
+                    clearTimeout(session.timer);
+                    session.ready = true;
+                    el('controls').querySelectorAll('button,select').forEach(button => { button.disabled = false; });
+                    player.set_voice(session.muted ? 0 : 1);
+                    player.set_playback_rate(Number(el('rate').value));
+                    status();
+                };
+                player.on_error_callback = error => {
+                    if (!ownsPlayer()) return;
+                    if (error?.domain === 'vr' && error.fatal === false) {
+                        el('reset').hidden = true; el('hint').hidden = true;
+                        fail('360°显示不可用，继续平面播放');
+                    } else {
+                        fail(error?.status ? `录像播放失败（HTTP ${error.status}）` : '录像播放失败，请检查文件和浏览器支持');
+                    }
+                };
+                const enhancementConfig = session.enhancements.buildConfig(player);
+                session.enhancements.bind(player);
+                const built = player.build({player_id: box.id, base_url: H265WebPyMKUI.sdkBase,
+                    wasm_js_uri: 'h265web_wasm.js?v=enhancements-20261028', wasm_wasm_uri: 'h265web_wasm.wasm?v=enhancements-20261028',
+                    width: '100%', height: box.clientHeight || 360, auto_play: true,
+                    ignore_audio: false, format_type: format, protocol: 'http', projection: session.projection,
+                    vr: {mouse_control: session.projection === 'erp360', touch_control: session.projection === 'erp360'}, ...enhancementConfig});
+                if (!built) throw new Error('播放器初始化失败');
+                if (!ownsPlayer()) return false;
+                player.set_voice(session.muted ? 0 : 1);
+                session.timer = setTimeout(() => { if (ownsPlayer()) fail('等待录像首帧超时'); }, 30000);
+                player.load_media(`/index/pyapi/recordings/file?id=${encodeURIComponent(record.id)}&disposition=inline`);
+                session.enhancements.refresh();
+                if (typeof ResizeObserver === 'function') {
+                    session.observer = new ResizeObserver(() => {
+                        if (ownsPlayer()) player.resize(box.clientWidth, box.clientHeight);
+                    });
+                    session.observer.observe(box);
+                }
+                return true;
+            } catch (error) { if (loading()) fail(error.message || '播放器启动失败'); return false; }
+        }
+        return startPlayback();
     }
+
     return {open, close};
 })();

@@ -8,19 +8,28 @@ const H265WebPyMKUI = (() => {
     const sdkBase = new URL('js/lib/h265web/', document.baseURI).href;
 
     function loadSdk() {
-        if (typeof window.H265webjsPlayer === 'function') return Promise.resolve();
         if (!sdkPending) {
-            sdkPending = new Promise((resolve, reject) => {
-                const script = document.createElement('script');
-                script.src = new URL('h265web.js?v=45033916', sdkBase).href;
-                script.onload = () => typeof window.H265webjsPlayer === 'function'
-                    ? resolve() : reject(new Error('播放器脚本没有提供 H265webjsPlayer'));
-                script.onerror = () => reject(new Error('播放器脚本加载失败'));
-                document.head.appendChild(script);
-            }).catch(error => {
-                sdkPending = null;
-                throw error;
+            const script = (name, available) => available() ? Promise.resolve() : new Promise((resolve, reject) => {
+                const element = document.createElement('script');
+                element.src = new URL(name + '?v=enhancements-20261028', sdkBase).href;
+                element.onload = () => available() ? resolve() : reject(new Error('播放器组件初始化失败'));
+                element.onerror = () => { element.remove(); reject(new Error('播放器组件加载失败')); };
+                document.head.appendChild(element);
             });
+            const styles = new Promise((resolve, reject) => {
+                if (document.querySelector('[data-h265web-enhancement-style]')) return resolve();
+                const element = document.createElement('link');
+                element.rel = 'stylesheet'; element.dataset.h265webEnhancementStyle = '';
+                element.href = new URL('demo-enhancements.css?v=enhancements-20261028', sdkBase).href;
+                element.onload = resolve;
+                element.onerror = () => { element.remove(); reject(new Error('播放器控件样式加载失败')); };
+                document.head.appendChild(element);
+            });
+            sdkPending = Promise.all([
+                script('h265web.js', () => typeof window.H265webjsPlayer === 'function'),
+                script('demo-enhancements.js', () => typeof window.createPlaybackEnhancementControls === 'function'),
+                styles
+            ]).catch(error => { sdkPending = null; throw error; });
         }
         return sdkPending;
     }
@@ -28,6 +37,7 @@ const H265WebPyMKUI = (() => {
     function clearSession(session) {
         clearTimeout(session.firstFrameTimer);
         session.resizeObserver?.disconnect();
+        session.enhancements?.unbind();
         session.modal.remove();
     }
 
@@ -61,7 +71,7 @@ const H265WebPyMKUI = (() => {
         const session = {
             generation: openGeneration, player: null, modal: document.createElement('div'),
             firstFrameTimer: null, resizeObserver: null, muted: true,
-            ready: false, vrFallback: false
+            ready: false, vrFallback: false, playbackRevision: 0, enhancements: null, projection: 'flat'
         };
         const current = () => allowed() && active === session && generation === openGeneration && session.modal.isConnected;
         active = session;
@@ -88,6 +98,7 @@ const H265WebPyMKUI = (() => {
                     <button class="bg-blue-600 text-white px-3 py-1 rounded hidden" data-role="vr-reset">重置视角</button>
                     <button class="bg-amber-600 text-white px-3 py-1 rounded hidden" data-role="retry">重试播放</button>
                 </div>
+                <fieldset data-role="enhancements" data-locale="zh" class="text-white"></fieldset>
                 <div class="mt-2 text-white/60 text-sm hidden" data-role="vr-hint">拖动画面或触摸调整视角，滚轮缩放</div>
                 <img class="hidden mt-3 max-w-full" data-role="capture" alt="播放截图">
             </div>`;
@@ -115,7 +126,8 @@ const H265WebPyMKUI = (() => {
             vrReset.classList.toggle('hidden', !vr || session.vrFallback);
             vrHint.classList.toggle('hidden', !vr || session.vrFallback);
             if (session.ready && !session.vrFallback) {
-                status.textContent = vr ? '播放中（360°，静音）' : '播放中（静音）';
+                const flags = [vr ? '360°' : '', session.muted ? '静音' : ''].filter(Boolean);
+                status.textContent = '播放中' + (flags.length ? '（' + flags.join('，') + '）' : '');
             }
         };
         session.modal.addEventListener('click', event => {
@@ -133,6 +145,7 @@ const H265WebPyMKUI = (() => {
             session.muted = !session.muted;
             session.player.set_voice(session.muted ? 0 : 1);
             event.currentTarget.textContent = session.muted ? '取消静音' : '静音';
+            updateProjectionUi();
         });
         session.modal.querySelector('[data-role="screenshot"]').addEventListener('click', () => {
             if (!current() || !session.player) return;
@@ -153,7 +166,8 @@ const H265WebPyMKUI = (() => {
                 status.textContent = '画面模式切换失败';
                 return;
             }
-            if (next === 'erp360') player.set_vr_controls?.({mouse: true, touch: true});
+            session.projection = next;
+            player.set_vr_controls?.({mouse: next === 'erp360', touch: next === 'erp360'});
             updateProjectionUi();
         });
         vrReset.addEventListener('click', () => {
@@ -170,61 +184,94 @@ const H265WebPyMKUI = (() => {
             });
         });
 
-        try {
-            const url = await urlFactory();
-            if (!current()) return false;
-            status.textContent = '正在加载播放器…';
-            await loadSdk();
-            if (!current()) return false;
-            const player = window.H265webjsPlayer();
-            session.player = player;
-            player.on_ready_show_done_callback = () => {
-                if (!current()) return;
-                clearTimeout(session.firstFrameTimer);
-                player.set_voice(0);
-                session.ready = true;
-                updateProjectionUi();
-            };
-            player.on_error_callback = error => {
-                if (!current()) return;
-                if (error?.domain === 'vr' && error.fatal === false) {
-                    session.vrFallback = true;
-                    updateProjectionUi();
-                    status.textContent = `360°显示不可用，继续平面播放（${error.code || '渲染失败'}）`;
-                    return;
+        async function startPlayback() {
+            const revision = ++session.playbackRevision;
+            const loading = () => current() && session.playbackRevision === revision;
+            clearTimeout(session.firstFrameTimer);
+            session.resizeObserver?.disconnect();
+            session.resizeObserver = null;
+            const previous = session.player;
+            session.player = null;
+            session.enhancements?.unbind();
+            session.ready = false;
+            session.vrFallback = false;
+            try {
+                if (previous) {
+                    releasePending = new Promise((resolve, reject) => {
+                        try { previous.release(resolve); } catch (error) { reject(error); }
+                    });
                 }
-                const statusCode = Number(error?.status || 0);
-                showFailure(statusCode ? `播放失败（HTTP ${statusCode}）` : '播放失败，请检查流和浏览器支持');
-            };
-            player.build({
-                player_id: playerBox.id,
-                base_url: sdkBase,
-                wasm_js_uri: 'h265web_wasm.js',
-                wasm_wasm_uri: 'h265web_wasm.wasm',
-                width: '100%', height: playerBox.clientHeight || 360,
-                auto_play: true, ignore_audio: false,
-                format_type: info.schema === 'hls' ? 'hls' : (info.schema === 'ts' ? 'ts' : 'flv'),
-                protocol: 'http',
-                ...(options.core ? {core: options.core} : {})
-            });
-            if (!current()) return false;
-            player.set_voice(0);
-            status.textContent = '等待首帧…';
-            session.firstFrameTimer = setTimeout(() => showFailure('等待首帧超时，请检查流后重试播放'), 30000);
-            player.load_media(url);
-            if (typeof ResizeObserver === 'function') {
-                session.resizeObserver = new ResizeObserver(() => {
-                    if (current() && session.player) {
-                        session.player.resize(playerBox.clientWidth, playerBox.clientHeight);
+                await releasePending;
+                if (!loading()) return false;
+                status.textContent = '正在获取播放授权…';
+                const url = await urlFactory();
+                if (!loading()) return false;
+                status.textContent = '正在加载播放器…';
+                await loadSdk();
+                if (!loading()) return false;
+                if (!session.enhancements) {
+                    session.enhancements = window.createPlaybackEnhancementControls(
+                        session.modal.querySelector('[data-role="enhancements"]'), () => session.player,
+                        {recreate: () => current() ? startPlayback() : false, play: () => session.modal.querySelector('[data-role="play"]').click()});
+                }
+                const player = window.H265webjsPlayer();
+                session.player = player;
+                const ownsPlayer = () => loading() && session.player === player;
+                player.on_ready_show_done_callback = () => {
+                    if (!ownsPlayer()) return;
+                    clearTimeout(session.firstFrameTimer);
+                    player.set_voice(session.muted ? 0 : 1);
+                    session.ready = true;
+                    updateProjectionUi();
+                };
+                player.on_error_callback = error => {
+                    if (!ownsPlayer()) return;
+                    if (error?.domain === 'vr' && error.fatal === false) {
+                        session.vrFallback = true;
+                        updateProjectionUi();
+                        status.textContent = `360°显示不可用，继续平面播放（${error.code || '渲染失败'}）`;
+                        return;
                     }
+                    const statusCode = Number(error?.status || 0);
+                    showFailure(statusCode ? `播放失败（HTTP ${statusCode}）` : '播放失败，请检查流和浏览器支持');
+                };
+                const enhancementConfig = session.enhancements.buildConfig(player);
+                session.enhancements.bind(player);
+                const built = player.build({
+                    player_id: playerBox.id,
+                    base_url: sdkBase,
+                    wasm_js_uri: 'h265web_wasm.js?v=enhancements-20261028',
+                    wasm_wasm_uri: 'h265web_wasm.wasm?v=enhancements-20261028',
+                    width: '100%', height: playerBox.clientHeight || 360,
+                    auto_play: true, ignore_audio: false, projection: session.projection,
+                    vr: {mouse_control: session.projection === 'erp360', touch_control: session.projection === 'erp360'},
+                    format_type: info.schema === 'hls' ? 'hls' : (info.schema === 'ts' ? 'ts' : 'flv'),
+                    protocol: 'http',
+                    ...(options.core ? {core: options.core} : {}),
+                    ...enhancementConfig
                 });
-                session.resizeObserver.observe(playerBox);
+                if (!built) throw new Error('播放器初始化失败');
+                if (!ownsPlayer()) return false;
+                player.set_voice(session.muted ? 0 : 1);
+                status.textContent = '等待首帧…';
+                session.firstFrameTimer = setTimeout(() => {
+                    if (ownsPlayer()) showFailure('等待首帧超时，请检查流后重试播放');
+                }, 30000);
+                player.load_media(url);
+                session.enhancements.refresh();
+                if (typeof ResizeObserver === 'function') {
+                    session.resizeObserver = new ResizeObserver(() => {
+                        if (ownsPlayer()) player.resize(playerBox.clientWidth, playerBox.clientHeight);
+                    });
+                    session.resizeObserver.observe(playerBox);
+                }
+                return true;
+            } catch (error) {
+                if (loading()) showFailure(error.message || '播放器启动失败');
+                return false;
             }
-            return true;
-        } catch (error) {
-            showFailure(error.message || '播放器启动失败');
-            return false;
         }
+        return startPlayback();
     }
 
     return {open, close, loadSdk, sdkBase};
