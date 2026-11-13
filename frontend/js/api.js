@@ -20,6 +20,11 @@ const Api = {
         localStorage.setItem('cookie', cookie);
     },
 
+    clearCookie() {
+        this.cookie = '';
+        localStorage.removeItem('cookie');
+    },
+
     getUrl(path) {
         const baseUrl = this.getBaseUrl();
         if (path.startsWith('http')) {
@@ -53,6 +58,8 @@ const Api = {
             if (data.code === -100) {
                 if (data.cookie) {
                     this.setCookie(data.cookie);
+                } else if (this.getCookie()) {
+                    this.clearCookie();
                 }
                 const currentPath = window.location.pathname;
                 const isLoginPage = currentPath.includes('login.html');
@@ -231,11 +238,12 @@ const Api = {
         return (wordToHex(a) + wordToHex(b) + wordToHex(c) + wordToHex(d)).toLowerCase();
     },
 
-    async login(secret, serverUrl) {
+    async login(secret, serverUrl, retry = true) {
         this.setBaseUrl(serverUrl);
 
         // 1. 检查是否有已保存的 cookie
         let cookie = this.getCookie();
+        const cookieFromCache = cookie !== '';
 
         // 2. 如果没有 cookie，调用 getApiList 获取
         if (!cookie) {
@@ -257,6 +265,9 @@ const Api = {
                     // 已经登录
                     return { success: true, msg: '已登录' };
                 } else {
+                    if (this.getCookie()) {
+                        this.clearCookie();
+                    }
                     return { success: false, msg: data1.msg || '获取 cookie 失败' };
                 }
             } catch (error) {
@@ -288,7 +299,12 @@ const Api = {
 
             if (data2.code === 0) {
                 return { success: true, msg: '登录成功' };
+            } else if (retry && cookieFromCache) {
+                // 旧 cookie 的 digest 必然失败，清空后自动用新 nonce 重试一次
+                this.clearCookie();
+                return this.login(secret, serverUrl, false);
             } else {
+                // 新 cookie 仍失败 → secret 本身错误；或已重试过 → 直接返回失败
                 return { success: false, msg: data2.msg || '登录失败' };
             }
         } catch (error) {
@@ -490,7 +506,7 @@ async function checkAuth() {
     // 加载已保存的服务器地址和 cookie
     Api.setBaseUrl(serverUrl);
     if (cookie) {
-        Api.setCookie(cookie);
+        Api.cookie = cookie;
     }
 
     // 检查是否已登录
@@ -498,12 +514,8 @@ async function checkAuth() {
         const result = await Api.getApiList();
         if (result.code === 0) {
             return true;
-        } else if (result.code === -100) {
-            if (!isLoginPage) {
-                window.location.href = 'login.html';
-            }
-            return false;
         }
+        // result.code === -100 时，clearCookie 与页面跳转已由 Api.getApiList() 内部的请求层处理
         return false;
     } catch (error) {
         if (!isLoginPage) {
